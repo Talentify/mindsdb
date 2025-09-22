@@ -108,23 +108,18 @@ class S3Handler(APIHandler):
         """
         Establishes a connection to the AWS (S3) account.
 
-        Raises:
-            ValueError: If the required connection parameters are not provided.
-
         Returns:
             boto3.client: A client object to the AWS (S3) account.
         """
         if self.is_connected is True:
             return self.connection
 
-        # Validate mandatory parameters.
-        if not all(key in self.connection_data for key in ["aws_access_key_id", "aws_secret_access_key"]):
-            raise ValueError("Required parameters (aws_access_key_id, aws_secret_access_key) must be provided.")
-
-        # Connect to S3 and configure mandatory credentials.
-        self.connection = self._connect_boto3()
+        # Se as credenciais não forem passadas, tenta conectar usando o ambiente (IAM Role via ServiceAccount)
+        if not ("aws_access_key_id" in self.connection_data and "aws_secret_access_key" in self.connection_data):
+            self.connection = self._connect_boto3(use_env_credentials=True)
+        else:
+            self.connection = self._connect_boto3()
         self.is_connected = True
-
         return self.connection
 
     @contextmanager
@@ -146,9 +141,11 @@ class S3Handler(APIHandler):
 
         duckdb_conn.execute("LOAD httpfs")
 
-        # Configure mandatory credentials.
-        duckdb_conn.execute(f"SET s3_access_key_id='{self.connection_data['aws_access_key_id']}'")
-        duckdb_conn.execute(f"SET s3_secret_access_key='{self.connection_data['aws_secret_access_key']}'")
+        # Configure credentials only if presentes
+        if "aws_access_key_id" in self.connection_data:
+            duckdb_conn.execute(f"SET s3_access_key_id='{self.connection_data['aws_access_key_id']}'")
+        if "aws_secret_access_key" in self.connection_data:
+            duckdb_conn.execute(f"SET s3_secret_access_key='{self.connection_data['aws_secret_access_key']}'")
 
         # Configure optional parameters.
         if "aws_session_token" in self.connection_data:
@@ -161,31 +158,36 @@ class S3Handler(APIHandler):
 
         # region = self._regions[bucket]
         # duckdb_conn.execute(f"SET s3_region='{region}'")
-        duckdb_conn.execute(f"SET s3_region='{self.connection_data['region_name']}'")
+        if "region_name" in self.connection_data:
+            duckdb_conn.execute(f"SET s3_region='{self.connection_data['region_name']}'")
 
         try:
             yield duckdb_conn
         finally:
             duckdb_conn.close()
 
-    def _connect_boto3(self) -> boto3.client:
+    def _connect_boto3(self, use_env_credentials=False) -> boto3.client:
         """
         Establishes a connection to the AWS (S3) account.
 
         Returns:
             boto3.client: A client object to the AWS (S3) account.
         """
-        # Configure mandatory credentials.
-        config = {
-            "aws_access_key_id": self.connection_data["aws_access_key_id"],
-            "aws_secret_access_key": self.connection_data["aws_secret_access_key"],
-        }
-
-        # Configure optional parameters.
-        optional_parameters = ["region_name", "aws_session_token"]
-        for parameter in optional_parameters:
-            if parameter in self.connection_data:
-                config[parameter] = self.connection_data[parameter]
+        config = {}
+        # Se use_env_credentials ou não existem as chaves, usa só region_name se existir
+        if use_env_credentials or not ("aws_access_key_id" in self.connection_data and "aws_secret_access_key" in self.connection_data):
+            if "region_name" in self.connection_data:
+                config["region_name"] = self.connection_data["region_name"]
+            # Não adiciona credenciais, boto3 usará IAM Role do ambiente
+        else:
+            # Configure mandatory credentials.
+            config["aws_access_key_id"] = self.connection_data["aws_access_key_id"]
+            config["aws_secret_access_key"] = self.connection_data["aws_secret_access_key"]
+            # Configure optional parameters.
+            optional_parameters = ["region_name", "aws_session_token"]
+            for parameter in optional_parameters:
+                if parameter in self.connection_data:
+                    config[parameter] = self.connection_data[parameter]
 
         client = boto3.client("s3", **config, config=Config(signature_version="s3v4"))
 
