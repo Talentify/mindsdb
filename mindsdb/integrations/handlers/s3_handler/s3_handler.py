@@ -1,3 +1,29 @@
+import time
+import threading
+
+    def _refresh_aws_creds_env(self):
+        """
+        Atualiza as variáveis de ambiente com credenciais temporárias usando boto3 (IRSA).
+        Só funciona dentro do cluster EKS com IRSA.
+        """
+        import boto3
+        session = boto3.Session()
+        creds = session.get_credentials().get_frozen_credentials()
+        os.environ['AWS_ACCESS_KEY_ID'] = creds.access_key
+        os.environ['AWS_SECRET_ACCESS_KEY'] = creds.secret_key
+        os.environ['AWS_SESSION_TOKEN'] = creds.token
+
+    def _start_aws_creds_auto_refresh(self, interval_minutes=50):
+        """
+        Inicia thread para renovar as credenciais temporárias periodicamente.
+        """
+        def refresher():
+            while True:
+                self._refresh_aws_creds_env()
+                time.sleep(interval_minutes * 60)
+        t = threading.Thread(target=refresher, daemon=True)
+        t.start()
+
 from typing import List
 from contextlib import contextmanager
 
@@ -138,16 +164,31 @@ class S3Handler(APIHandler):
             duckdb_conn.execute("LOAD httpfs")
             # Cria secret S3 para credential_chain (IAM Role, env, etc)
             region = self.connection_data.get("region_name", "us-east-1")
-            duckdb_conn.execute(f"""
-                CREATE OR REPLACE SECRET (
-                    TYPE s3,
-                    PROVIDER credential_chain,
-                    REGION '{region}'
-                );
-            """)
+            try:
+                duckdb_conn.execute("""
+                    CREATE OR REPLACE SECRET (
+                        TYPE s3,
+                        PROVIDER credential_chain
+                    );
+                """)
+            except Exception as secret_err:
+                # Se falhar, tenta renovar credenciais temporárias e tenta de novo
+                logger.warning(f"Falha ao criar SECRET credential_chain, tentando renovar credenciais temporárias: {secret_err}")
+                self._refresh_aws_creds_env()
+                duckdb_conn.execute("""
+                    CREATE OR REPLACE SECRET (
+                        TYPE s3,
+                        PROVIDER credential_chain
+                    );
+                """)
         except Exception as load_err:
             logger.error(f"Failed to load httpfs: {load_err}")
             raise
+
+        # Inicia auto-refresh das credenciais temporárias em background (apenas uma vez por handler)
+        if not hasattr(self, '_aws_creds_auto_refresh_started'):
+            self._start_aws_creds_auto_refresh()
+            self._aws_creds_auto_refresh_started = True
 
         # Configure credentials only if presentes
         if "aws_access_key_id" in self.connection_data:
