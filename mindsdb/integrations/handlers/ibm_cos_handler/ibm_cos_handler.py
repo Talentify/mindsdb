@@ -157,9 +157,13 @@ class IBMCloudObjectStorageHandler(APIHandler):
 
     @contextmanager
     def _connect_duckdb(self):
+
         duckdb_conn = duckdb.connect(":memory:")
-        duckdb_conn.execute("INSTALL httpfs")
-        duckdb_conn.execute("LOAD httpfs")
+        try:
+            duckdb_conn.execute("LOAD httpfs")
+        except Exception as load_err:
+            logger.error(f"Failed to load httpfs: {load_err}")
+            raise
 
         duckdb_conn.execute(
             f"SET s3_access_key_id='{self.connection_data['cos_hmac_access_key_id']}'"
