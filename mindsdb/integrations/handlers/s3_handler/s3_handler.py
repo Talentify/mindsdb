@@ -133,13 +133,16 @@ class S3Handler(APIHandler):
         """
         # Connect to S3 via DuckDB.
         duckdb_conn = duckdb.connect(":memory:")
+        # try LOAD httpfs before INSTALL
         try:
-            duckdb_conn.execute("INSTALL httpfs")
-        except HTTPException as http_error:
-            logger.debug(f"Error installing the httpfs extension, {http_error}! Forcing installation.")
-            duckdb_conn.execute("FORCE INSTALL httpfs")
-
-        duckdb_conn.execute("LOAD httpfs")
+            duckdb_conn.execute("LOAD httpfs")
+        except Exception as load_err:
+            try:
+                duckdb_conn.execute("INSTALL httpfs")
+                duckdb_conn.execute("LOAD httpfs")
+            except Exception as install_err:
+                logger.error(f"Failed to install/load httpfs: {install_err}")
+                raise
 
         # Configure credentials only if presentes
         if "aws_access_key_id" in self.connection_data:
