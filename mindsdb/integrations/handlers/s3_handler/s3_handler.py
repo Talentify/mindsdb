@@ -137,12 +137,8 @@ class S3Handler(APIHandler):
         try:
             duckdb_conn.execute("LOAD httpfs")
         except Exception as load_err:
-            try:
-                duckdb_conn.execute("INSTALL httpfs")
-                duckdb_conn.execute("LOAD httpfs")
-            except Exception as install_err:
-                logger.error(f"Failed to install/load httpfs: {install_err}")
-                raise
+            logger.error(f"Failed to load httpfs: {load_err}")
+            raise
 
         # Configure credentials only if presentes
         if "aws_access_key_id" in self.connection_data:
