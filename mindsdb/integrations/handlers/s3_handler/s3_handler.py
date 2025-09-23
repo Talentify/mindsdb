@@ -136,6 +136,15 @@ class S3Handler(APIHandler):
         # try LOAD httpfs before INSTALL
         try:
             duckdb_conn.execute("LOAD httpfs")
+            # Cria secret S3 para credential_chain (IAM Role, env, etc)
+            region = self.connection_data.get("region_name", "us-east-1")
+            duckdb_conn.execute(f"""
+                CREATE OR REPLACE SECRET (
+                    TYPE s3,
+                    PROVIDER credential_chain,
+                    REGION '{region}'
+                );
+            """)
         except Exception as load_err:
             logger.error(f"Failed to load httpfs: {load_err}")
             raise
