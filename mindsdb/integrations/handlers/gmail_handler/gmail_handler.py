@@ -275,7 +275,8 @@ class GmailHandler(APIHandler):
 
         self.token_file = None
         self.max_page_size = 500
-        self.max_batch_size = 100
+        self.max_batch_size = 10  # Significantly reduced to respect Gmail's concurrent request limits
+        self.batch_delay = 1.5  # Delay in seconds between batches
         self.service = None
         self.is_connected = False
 
@@ -423,7 +424,12 @@ class GmailHandler(APIHandler):
 
     def _parse_message(self, data, message, exception):
         if exception:
-            logger.error(f'Exception in getting full email: {exception}')
+            # Provide more specific error logging
+            if isinstance(exception, HttpError) and exception.resp.status == 429:
+                logger.error(f'Exception in getting full email: {exception}')
+                logger.error('Rate limit exceeded. Consider reducing batch size or adding more delays between requests.')
+            else:
+                logger.error(f'Exception in getting full email: {exception}')
             return
 
         payload = message['payload']
@@ -456,12 +462,34 @@ class GmailHandler(APIHandler):
         data.append(row)
 
     def _get_messages(self, data, messages):
+        # Add a small delay before processing to avoid bursts
+        time.sleep(0.1)
+
         batch_req = self.service.new_batch_http_request(
             lambda id, response, exception: self._parse_message(data, response, exception))
         for message in messages:
             batch_req.add(self.service.users().messages().get(userId='me', id=message['id']))
 
-        batch_req.execute()
+        # Execute with exponential backoff retry for rate limiting
+        max_retries = 5
+        base_delay = 2  # Start with 2 seconds (increased from 1)
+
+        for attempt in range(max_retries):
+            try:
+                batch_req.execute()
+                return  # Success, exit the function
+            except HttpError as error:
+                if error.resp.status == 429:  # Rate limit exceeded
+                    if attempt < max_retries - 1:  # Don't sleep on the last attempt
+                        delay = base_delay * (2 ** attempt)  # Exponential backoff: 2s, 4s, 8s, 16s, 32s
+                        logger.warning(f'Rate limit hit (429), retrying in {delay}s (attempt {attempt + 1}/{max_retries})')
+                        time.sleep(delay)
+                    else:
+                        logger.error(f'Rate limit exceeded after {max_retries} retries')
+                        raise  # Re-raise on final attempt
+                else:
+                    # For non-rate-limit errors, raise immediately
+                    raise
 
     def get_attachments(self, result):
         for index, email in result.iterrows():
@@ -481,6 +509,11 @@ class GmailHandler(APIHandler):
         total_pages = len(messages) // self.max_batch_size
         for page in range(total_pages):
             self._get_messages(data, messages[page * self.max_batch_size:(page + 1) * self.max_batch_size])
+
+            # Add delay between batches to avoid overwhelming the API
+            if page < total_pages - 1 or len(messages) % self.max_batch_size > 0:
+                time.sleep(self.batch_delay)
+                logger.debug(f'Waiting {self.batch_delay}s between batches to respect rate limits')
 
         # Get the remaining messsages, if any
         if len(messages) % self.max_batch_size > 0:
