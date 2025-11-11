@@ -142,6 +142,11 @@ class Project:
         """
         Create a combined query from view's query and outer query.
         """
+        # Create deep copies to avoid modifying original query objects
+        # This prevents issues where schema discovery queries (with Star() targets)
+        # affect subsequent user queries
+        view_query = deepcopy(view_query)
+        query = deepcopy(query)
 
         # apply optimizations
         if query.where is not None:
@@ -219,6 +224,38 @@ class Project:
 
                 view_query.where = view_where
 
+        # If the outer query has specific targets (not Star), propagate them to the view query
+        # This ensures that when the query is flattened/optimized, the column selection is preserved
+        if query.targets and not any(isinstance(t, Star) for t in query.targets):
+            # Replace view's Star(*) with the user's specific column selection
+            view_query.targets = deepcopy(query.targets)
+
+        # Move ORDER BY, LIMIT, and OFFSET into view query to avoid redundant post-processing
+        # This optimization allows handlers to receive these clauses directly
+        if query.order_by and not view_query.order_by:
+            view_query.order_by = deepcopy(query.order_by)
+            query.order_by = None
+
+        if query.limit is not None:
+            if view_query.limit is None:
+                view_query.limit = deepcopy(query.limit)
+            else:
+                # If both have limits, use the smaller one
+                outer_val = query.limit.value if hasattr(query.limit, 'value') else query.limit
+                inner_val = view_query.limit.value if hasattr(view_query.limit, 'value') else view_query.limit
+                view_query.limit = Constant(min(outer_val, inner_val))
+            query.limit = None
+
+        if query.offset is not None:
+            if view_query.offset is None:
+                view_query.offset = deepcopy(query.offset)
+            else:
+                # Combine offsets
+                outer_val = query.offset.value if hasattr(query.offset, 'value') else query.offset
+                inner_val = view_query.offset.value if hasattr(view_query.offset, 'value') else view_query.offset
+                view_query.offset = Constant(outer_val + inner_val)
+            query.offset = None
+
         # combine outer query with view's query
         view_query.parentheses = True
         query.from_table = view_query
@@ -231,6 +268,7 @@ class Project:
         query_applied = False
         try:
             view_query = view_meta["query_ast"]
+
             if isinstance(view_query, Select):
                 view_query = self.combine_view_select(view_query, query)
                 query_applied = True
