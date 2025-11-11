@@ -399,8 +399,6 @@ class ReportsTable(APITable):
 
     def _response_to_dataframe(self, response) -> pd.DataFrame:
         """Convert GA4 API response to pandas DataFrame"""
-        # if response.row_count == 0:
-        #    return pd.DataFrame()
 
         # Extract column names and sanitize them (replace colons with underscores)
         # This handles custom dimensions like customEvent:job_title -> customEvent_job_title
