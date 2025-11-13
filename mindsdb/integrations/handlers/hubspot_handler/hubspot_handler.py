@@ -1,8 +1,9 @@
 from hubspot import HubSpot
 
-from mindsdb.integrations.handlers.hubspot_handler.hubspot_tables import (
-    ContactsTable, CompaniesTable, DealsTable
-)
+from mindsdb.integrations.handlers.hubspot_handler.tables.companies_table import CompaniesTable
+from mindsdb.integrations.handlers.hubspot_handler.tables.contacts_table import ContactsTable
+from mindsdb.integrations.handlers.hubspot_handler.tables.deals_table import DealsTable
+
 from mindsdb.integrations.libs.api_handler import APIHandler
 from mindsdb.integrations.libs.response import (
     HandlerStatusResponse as StatusResponse,
