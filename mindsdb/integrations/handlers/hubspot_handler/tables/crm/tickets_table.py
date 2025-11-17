@@ -26,19 +26,19 @@ from mindsdb.integrations.handlers.hubspot_handler.tables.crm.base_hubspot_table
 logger = log.getLogger(__name__)
 
 
-class DealsTable(HubSpotSearchMixin, APITable):
-    """Hubspot Deals table."""
+class TicketsTable(HubSpotSearchMixin, APITable):
+    """Hubspot Tickets table."""
 
     # Default essential properties to fetch (to avoid overloading with 100+ properties)
     DEFAULT_PROPERTIES = [
-        'dealname', 'amount', 'pipeline', 'dealstage', 'closedate',
-        'hubspot_owner_id', 'dealtype', 'description',
-        'createdate', 'hs_lastmodifieddate'
+        'subject', 'content', 'hs_pipeline', 'hs_pipeline_stage', 'hs_ticket_priority',
+        'hubspot_owner_id', 'hs_ticket_category', 'source_type', 'createdate',
+        'hs_lastmodifieddate', 'closed_date'
     ]
 
     def select(self, query: ast.Select) -> pd.DataFrame:
         """
-        Pulls Hubspot Deals data
+        Pulls Hubspot Tickets data
 
         Parameters
         ----------
@@ -48,7 +48,7 @@ class DealsTable(HubSpotSearchMixin, APITable):
         Returns
         -------
         pd.DataFrame
-            Hubspot Deals matching the query
+            Hubspot Tickets matching the query
 
         Raises
         ------
@@ -59,7 +59,7 @@ class DealsTable(HubSpotSearchMixin, APITable):
 
         select_statement_parser = SELECTQueryParser(
             query,
-            "deals",
+            "tickets",
             self.get_columns()
         )
         selected_columns, where_conditions, order_by_conditions, result_limit = select_statement_parser.parse_query()
@@ -75,8 +75,8 @@ class DealsTable(HubSpotSearchMixin, APITable):
 
             if hubspot_filters:
                 logger.info(f"Using HubSpot search API with {len(hubspot_filters)} filter(s)")
-                deals_df = pd.json_normalize(
-                    self.search_deals(
+                tickets_df = pd.json_normalize(
+                    self.search_tickets(
                         filters=hubspot_filters,
                         properties=requested_properties,
                         limit=result_limit
@@ -85,27 +85,27 @@ class DealsTable(HubSpotSearchMixin, APITable):
                 where_conditions = []
             else:
                 logger.info("No valid HubSpot filters, using get_all")
-                deals_df = pd.json_normalize(
-                    self.get_deals(limit=result_limit, properties=requested_properties)
+                tickets_df = pd.json_normalize(
+                    self.get_tickets(limit=result_limit, properties=requested_properties)
                 )
         else:
-            deals_df = pd.json_normalize(
-                self.get_deals(limit=result_limit, properties=requested_properties)
+            tickets_df = pd.json_normalize(
+                self.get_tickets(limit=result_limit, properties=requested_properties)
             )
 
         select_statement_executor = SELECTQueryExecutor(
-            deals_df,
+            tickets_df,
             selected_columns,
             where_conditions,
             order_by_conditions
         )
-        deals_df = select_statement_executor.execute_query()
+        tickets_df = select_statement_executor.execute_query()
 
-        return deals_df
+        return tickets_df
 
     def insert(self, query: ast.Insert) -> None:
         """
-        Inserts data into HubSpot "POST /crm/v3/objects/deals/batch/create" API endpoint.
+        Inserts data into HubSpot "POST /crm/v3/objects/tickets/batch/create" API endpoint.
 
         Parameters
         ----------
@@ -123,24 +123,24 @@ class DealsTable(HubSpotSearchMixin, APITable):
         """
         # Get dynamic list of supported columns from properties cache
         try:
-            properties_cache = self.handler.get_properties_cache('deals')
+            properties_cache = self.handler.get_properties_cache('tickets')
             supported_columns = list(properties_cache['property_names'])
         except Exception as e:
             logger.warning(f"Failed to get dynamic columns for insert, using minimal set: {e}")
-            supported_columns = ['amount', 'dealname', 'pipeline', 'closedate', 'dealstage', 'hubspot_owner_id']
+            supported_columns = ['subject', 'content', 'hs_pipeline', 'hs_pipeline_stage', 'hs_ticket_priority']
 
         insert_statement_parser = INSERTQueryParser(
             query,
             supported_columns=supported_columns,
-            mandatory_columns=['dealname'],
+            mandatory_columns=['subject'],
             all_mandatory=False,
         )
-        deals_data = insert_statement_parser.parse_query()
-        self.create_deals(deals_data)
+        tickets_data = insert_statement_parser.parse_query()
+        self.create_tickets(tickets_data)
 
     def update(self, query: ast.Update) -> None:
         """
-        Updates data from HubSpot "PATCH /crm/v3/objects/deals/batch/update" API endpoint.
+        Updates data from HubSpot "PATCH /crm/v3/objects/tickets/batch/update" API endpoint.
 
         Parameters
         ----------
@@ -159,19 +159,19 @@ class DealsTable(HubSpotSearchMixin, APITable):
         update_statement_parser = UPDATEQueryParser(query)
         values_to_update, where_conditions = update_statement_parser.parse_query()
 
-        deals_df = pd.json_normalize(self.get_deals())
+        tickets_df = pd.json_normalize(self.get_tickets())
         update_query_executor = UPDATEQueryExecutor(
-            deals_df,
+            tickets_df,
             where_conditions
         )
 
-        deals_df = update_query_executor.execute_query()
-        deal_ids = deals_df['id'].tolist()
-        self.update_deals(deal_ids, values_to_update)
+        tickets_df = update_query_executor.execute_query()
+        ticket_ids = tickets_df['id'].tolist()
+        self.update_tickets(ticket_ids, values_to_update)
 
     def delete(self, query: ast.Delete) -> None:
         """
-        Deletes data from HubSpot "DELETE /crm/v3/objects/deals/batch/archive" API endpoint.
+        Deletes data from HubSpot "DELETE /crm/v3/objects/tickets/batch/archive" API endpoint.
 
         Parameters
         ----------
@@ -190,15 +190,15 @@ class DealsTable(HubSpotSearchMixin, APITable):
         delete_statement_parser = DELETEQueryParser(query)
         where_conditions = delete_statement_parser.parse_query()
 
-        deals_df = pd.json_normalize(self.get_deals())
+        tickets_df = pd.json_normalize(self.get_tickets())
         delete_query_executor = DELETEQueryExecutor(
-            deals_df,
+            tickets_df,
             where_conditions
         )
 
-        deals_df = delete_query_executor.execute_query()
-        deal_ids = deals_df['id'].tolist()
-        self.delete_deals(deal_ids)
+        tickets_df = delete_query_executor.execute_query()
+        ticket_ids = tickets_df['id'].tolist()
+        self.delete_tickets(ticket_ids)
 
     def get_columns(self) -> List[Text]:
         """
@@ -209,9 +209,9 @@ class DealsTable(HubSpotSearchMixin, APITable):
         # Return id + default essential properties
         return ['id'] + self.DEFAULT_PROPERTIES
 
-    def get_deals(self, properties: List[Text] = None, **kwargs) -> List[Dict]:
+    def get_tickets(self, properties: List[Text] = None, **kwargs) -> List[Dict]:
         """
-        Fetch deals with specified properties.
+        Fetch tickets with specified properties.
 
         Parameters
         ----------
@@ -224,7 +224,7 @@ class DealsTable(HubSpotSearchMixin, APITable):
         Returns
         -------
         List[Dict]
-            List of deal dictionaries with requested properties
+            List of ticket dictionaries with requested properties
         """
         hubspot = self.handler.connect()
 
@@ -234,7 +234,7 @@ class DealsTable(HubSpotSearchMixin, APITable):
             properties_to_fetch = self.DEFAULT_PROPERTIES
         elif len(properties) == 0:
             # Empty list means fetch ALL available properties
-            properties_cache = self.handler.get_properties_cache('deals')
+            properties_cache = self.handler.get_properties_cache('tickets')
             properties_to_fetch = list(properties_cache['property_names'])
         else:
             # Specific properties requested
@@ -242,25 +242,25 @@ class DealsTable(HubSpotSearchMixin, APITable):
 
         # Add properties parameter to API call
         kwargs['properties'] = properties_to_fetch
-        deals = hubspot.crm.deals.get_all(**kwargs)
+        tickets = hubspot.crm.tickets.get_all(**kwargs)
 
-        deals_dict = []
-        for deal in deals:
+        tickets_dict = []
+        for ticket in tickets:
             # Start with the ID
-            deal_dict = {"id": deal.id}
+            ticket_dict = {"id": ticket.id}
 
             # Extract properties that were returned
-            if hasattr(deal, 'properties') and deal.properties:
-                for prop_name, prop_value in deal.properties.items():
-                    deal_dict[prop_name] = prop_value
+            if hasattr(ticket, 'properties') and ticket.properties:
+                for prop_name, prop_value in ticket.properties.items():
+                    ticket_dict[prop_name] = prop_value
 
-            deals_dict.append(deal_dict)
+            tickets_dict.append(ticket_dict)
 
-        return deals_dict
+        return tickets_dict
 
-    def search_deals(self, filters: List[Dict], properties: List[Text] = None, limit: int = None) -> List[Dict]:
+    def search_tickets(self, filters: List[Dict], properties: List[Text] = None, limit: int = None) -> List[Dict]:
         """
-        Search deals using HubSpot search API with filters.
+        Search tickets using HubSpot search API with filters.
 
         Parameters
         ----------
@@ -274,7 +274,7 @@ class DealsTable(HubSpotSearchMixin, APITable):
         Returns
         -------
         List[Dict]
-            List of deal dictionaries matching the filters
+            List of ticket dictionaries matching the filters
         """
         hubspot = self.handler.connect()
 
@@ -282,7 +282,7 @@ class DealsTable(HubSpotSearchMixin, APITable):
         if properties is None:
             properties_to_fetch = self.DEFAULT_PROPERTIES
         elif len(properties) == 0:
-            properties_cache = self.handler.get_properties_cache('deals')
+            properties_cache = self.handler.get_properties_cache('tickets')
             properties_to_fetch = list(properties_cache['property_names'])
         else:
             properties_to_fetch = properties
@@ -295,7 +295,7 @@ class DealsTable(HubSpotSearchMixin, APITable):
         }
 
         # Pagination to fetch all results
-        all_deals = []
+        all_tickets = []
         after = 0
 
         try:
@@ -304,21 +304,21 @@ class DealsTable(HubSpotSearchMixin, APITable):
                     search_request["after"] = after
 
                 # Call HubSpot search API
-                response = hubspot.crm.deals.search_api.do_search(
+                response = hubspot.crm.tickets.search_api.do_search(
                     public_object_search_request=search_request
                 )
 
-                # Extract deals from response
-                for deal in response.results:
-                    deal_dict = {"id": deal.id}
-                    if hasattr(deal, 'properties') and deal.properties:
-                        for prop_name, prop_value in deal.properties.items():
-                            deal_dict[prop_name] = prop_value
-                    all_deals.append(deal_dict)
+                # Extract tickets from response
+                for ticket in response.results:
+                    ticket_dict = {"id": ticket.id}
+                    if hasattr(ticket, 'properties') and ticket.properties:
+                        for prop_name, prop_value in ticket.properties.items():
+                            ticket_dict[prop_name] = prop_value
+                    all_tickets.append(ticket_dict)
 
                 # Check if we've reached the limit
-                if limit and len(all_deals) >= limit:
-                    all_deals = all_deals[:limit]
+                if limit and len(all_tickets) >= limit:
+                    all_tickets = all_tickets[:limit]
                     break
 
                 # Check if there are more results
@@ -331,41 +331,41 @@ class DealsTable(HubSpotSearchMixin, APITable):
                     break
 
         except Exception as e:
-            logger.error(f"Error searching deals: {e}")
-            raise Exception(f"Deal search failed: {e}")
+            logger.error(f"Error searching tickets: {e}")
+            raise Exception(f"Ticket search failed: {e}")
 
-        logger.info(f"Found {len(all_deals)} deals matching filters")
-        return all_deals
+        logger.info(f"Found {len(all_tickets)} tickets matching filters")
+        return all_tickets
 
-    def create_deals(self, deals_data: List[Dict[Text, Any]]) -> None:
+    def create_tickets(self, tickets_data: List[Dict[Text, Any]]) -> None:
         hubspot = self.handler.connect()
-        deals_to_create = [HubSpotObjectInputCreate(properties=deal) for deal in deals_data]
+        tickets_to_create = [HubSpotObjectInputCreate(properties=ticket) for ticket in tickets_data]
         try:
-            created_deals = hubspot.crm.deals.batch_api.create(
-                HubSpotBatchObjectBatchInput(inputs=deals_to_create),
+            created_tickets = hubspot.crm.tickets.batch_api.create(
+                HubSpotBatchObjectInputCreate(inputs=tickets_to_create),
             )
-            logger.info(f"Deals created with ID's {[created_deal.id for created_deal in created_deals.results]}")
+            logger.info(f"Tickets created with ID's {[created_ticket.id for created_ticket in created_tickets.results]}")
         except Exception as e:
-            raise Exception(f"Deals creation failed {e}")
+            raise Exception(f"Tickets creation failed {e}")
 
-    def update_deals(self, deal_ids: List[Text], values_to_update: Dict[Text, Any]) -> None:
+    def update_tickets(self, ticket_ids: List[Text], values_to_update: Dict[Text, Any]) -> None:
         hubspot = self.handler.connect()
-        deals_to_update = [HubSpotObjectBatchInput(id=deal_id, properties=values_to_update) for deal_id in deal_ids]
+        tickets_to_update = [HubSpotObjectBatchInput(id=ticket_id, properties=values_to_update) for ticket_id in ticket_ids]
         try:
-            updated_deals = hubspot.crm.deals.batch_api.update(
-                HubSpotBatchObjectBatchInput(inputs=deals_to_update),
+            updated_tickets = hubspot.crm.tickets.batch_api.update(
+                HubSpotBatchObjectBatchInput(inputs=tickets_to_update),
             )
-            logger.info(f"Deals with ID {[updated_deal.id for updated_deal in updated_deals.results]} updated")
+            logger.info(f"Tickets with ID {[updated_ticket.id for updated_ticket in updated_tickets.results]} updated")
         except Exception as e:
-            raise Exception(f"Deals update failed {e}")
+            raise Exception(f"Tickets update failed {e}")
 
-    def delete_deals(self, deal_ids: List[Text]) -> None:
+    def delete_tickets(self, ticket_ids: List[Text]) -> None:
         hubspot = self.handler.connect()
-        deals_to_delete = [HubSpotObjectId(id=deal_id) for deal_id in deal_ids]
+        tickets_to_delete = [HubSpotObjectId(id=ticket_id) for ticket_id in ticket_ids]
         try:
-            hubspot.crm.deals.batch_api.archive(
-                HubSpotBatchObjectIdInput(inputs=deals_to_delete),
+            hubspot.crm.tickets.batch_api.archive(
+                HubSpotBatchObjectIdInput(inputs=tickets_to_delete),
             )
-            logger.info("Deals deleted")
+            logger.info("Tickets deleted")
         except Exception as e:
-            raise Exception(f"Deals deletion failed {e}")
+            raise Exception(f"Tickets deletion failed {e}")

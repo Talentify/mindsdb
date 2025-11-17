@@ -5,6 +5,16 @@ from mindsdb.integrations.handlers.hubspot_handler.tables.crm.companies_table im
 from mindsdb.integrations.handlers.hubspot_handler.tables.crm.contacts_table import ContactsTable
 from mindsdb.integrations.handlers.hubspot_handler.tables.crm.deals_table import DealsTable
 from mindsdb.integrations.handlers.hubspot_handler.tables.crm.properties_table import PropertiesTable
+from mindsdb.integrations.handlers.hubspot_handler.tables.crm.tickets_table import TicketsTable
+from mindsdb.integrations.handlers.hubspot_handler.tables.crm.line_items_table import LineItemsTable
+from mindsdb.integrations.handlers.hubspot_handler.tables.crm.quotes_table import QuotesTable
+from mindsdb.integrations.handlers.hubspot_handler.tables.crm.products_table import ProductsTable
+from mindsdb.integrations.handlers.hubspot_handler.tables.crm.calls_table import CallsTable
+from mindsdb.integrations.handlers.hubspot_handler.tables.crm.emails_table import EmailsTable
+from mindsdb.integrations.handlers.hubspot_handler.tables.crm.meetings_table import MeetingsTable
+from mindsdb.integrations.handlers.hubspot_handler.tables.crm.notes_table import NotesTable
+from mindsdb.integrations.handlers.hubspot_handler.tables.crm.tasks_table import TasksTable
+from mindsdb.integrations.handlers.hubspot_handler.tables.crm.leads_table import LeadsTable
 
 from mindsdb.integrations.libs.api_handler import APIHandler
 from mindsdb.integrations.libs.response import (
@@ -45,6 +55,7 @@ class HubspotHandler(APIHandler):
         self._properties_cache = {}
         self._properties_cache_ttl = 3600  # 1 hour in seconds
 
+        # Core CRM Objects
         companies_data = CompaniesTable(self)
         self._register_table("companies", companies_data)
 
@@ -54,6 +65,39 @@ class HubspotHandler(APIHandler):
         deals_data = DealsTable(self)
         self._register_table("deals", deals_data)
 
+        tickets_data = TicketsTable(self)
+        self._register_table("tickets", tickets_data)
+
+        leads_data = LeadsTable(self)
+        self._register_table("leads", leads_data)
+
+        # Commerce Objects
+        line_items_data = LineItemsTable(self)
+        self._register_table("line_items", line_items_data)
+
+        quotes_data = QuotesTable(self)
+        self._register_table("quotes", quotes_data)
+
+        products_data = ProductsTable(self)
+        self._register_table("products", products_data)
+
+        # Activity Objects
+        calls_data = CallsTable(self)
+        self._register_table("calls", calls_data)
+
+        emails_data = EmailsTable(self)
+        self._register_table("emails", emails_data)
+
+        meetings_data = MeetingsTable(self)
+        self._register_table("meetings", meetings_data)
+
+        notes_data = NotesTable(self)
+        self._register_table("notes", notes_data)
+
+        tasks_data = TasksTable(self)
+        self._register_table("tasks", tasks_data)
+
+        # Metadata
         properties_data = PropertiesTable(self)
         self._register_table("properties", properties_data)
 

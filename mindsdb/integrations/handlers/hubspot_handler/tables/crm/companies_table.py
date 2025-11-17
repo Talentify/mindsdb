@@ -6,7 +6,7 @@ from hubspot.crm.objects import (
     SimplePublicObjectInputForCreate as HubSpotObjectInputCreate,
     BatchInputSimplePublicObjectId as HubSpotBatchObjectIdInput,
     BatchInputSimplePublicObjectBatchInput as HubSpotBatchObjectBatchInput,
-    BatchInputSimplePublicObjectInputForCreate as HubSpotBatchObjectInputCreate,
+    BatchInputSimplePublicObjectBatchInputForCreate as HubSpotBatchObjectInputCreate,
 )
 
 from mindsdb_sql_parser import ast
