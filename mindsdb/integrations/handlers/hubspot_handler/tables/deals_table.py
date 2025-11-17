@@ -28,6 +28,13 @@ logger = log.getLogger(__name__)
 class DealsTable(APITable):
     """Hubspot Deals table."""
 
+    # Default essential properties to fetch (to avoid overloading with 100+ properties)
+    DEFAULT_PROPERTIES = [
+        'dealname', 'amount', 'pipeline', 'dealstage', 'closedate',
+        'hubspot_owner_id', 'dealtype', 'description',
+        'createdate', 'hs_lastmodifieddate'
+    ]
+
     def select(self, query: ast.Select) -> pd.DataFrame:
         """
         Pulls Hubspot Deals data
@@ -56,7 +63,16 @@ class DealsTable(APITable):
         )
         selected_columns, where_conditions, order_by_conditions, result_limit = select_statement_parser.parse_query()
 
-        deals_df = pd.json_normalize(self.get_deals(limit=result_limit))
+        # Determine which properties to fetch from HubSpot API
+        # If specific columns are requested, fetch only those (+ id)
+        # If SELECT * is used, fetch only default essential properties
+        requested_properties = None
+        if selected_columns and len(selected_columns) > 0:
+            # User requested specific columns - fetch only those
+            requested_properties = [col for col in selected_columns if col != 'id']
+        # else: Will use default properties in get_deals()
+
+        deals_df = pd.json_normalize(self.get_deals(limit=result_limit, properties=requested_properties))
         select_statement_executor = SELECTQueryExecutor(
             deals_df,
             selected_columns,
@@ -85,9 +101,17 @@ class DealsTable(APITable):
         ValueError
             If the query contains an unsupported condition
         """
+        # Get dynamic list of supported columns from properties cache
+        try:
+            properties_cache = self.handler.get_properties_cache('deals')
+            supported_columns = list(properties_cache['property_names'])
+        except Exception as e:
+            logger.warning(f"Failed to get dynamic columns for insert, using minimal set: {e}")
+            supported_columns = ['amount', 'dealname', 'pipeline', 'closedate', 'dealstage', 'hubspot_owner_id']
+
         insert_statement_parser = INSERTQueryParser(
             query,
-            supported_columns=['amount', 'dealname', 'pipeline', 'closedate', 'dealstage', 'hubspot_owner_id'],
+            supported_columns=supported_columns,
             mandatory_columns=['dealname'],
             all_mandatory=False,
         )
@@ -157,25 +181,61 @@ class DealsTable(APITable):
         self.delete_deals(deal_ids)
 
     def get_columns(self) -> List[Text]:
-        return pd.json_normalize(self.get_deals(limit=1)).columns.tolist()
+        """
+        Get column names for the table.
+        Returns default essential properties to avoid overloading with 100+ properties.
+        Users can still query specific custom properties explicitly in SELECT.
+        """
+        # Return id + default essential properties
+        return ['id'] + self.DEFAULT_PROPERTIES
 
-    def get_deals(self, **kwargs) -> List[Dict]:
+    def get_deals(self, properties: List[Text] = None, **kwargs) -> List[Dict]:
+        """
+        Fetch deals with specified properties.
+
+        Parameters
+        ----------
+        properties : List[Text], optional
+            List of property names to fetch. If None, fetches DEFAULT_PROPERTIES.
+            To fetch ALL properties, pass an empty list [].
+        **kwargs : dict
+            Additional arguments to pass to the HubSpot API (e.g., limit)
+
+        Returns
+        -------
+        List[Dict]
+            List of deal dictionaries with requested properties
+        """
         hubspot = self.handler.connect()
+
+        # Determine which properties to request from HubSpot
+        if properties is None:
+            # Default: fetch only essential properties
+            properties_to_fetch = self.DEFAULT_PROPERTIES
+        elif len(properties) == 0:
+            # Empty list means fetch ALL available properties
+            properties_cache = self.handler.get_properties_cache('deals')
+            properties_to_fetch = list(properties_cache['property_names'])
+        else:
+            # Specific properties requested
+            properties_to_fetch = properties
+
+        # Add properties parameter to API call
+        kwargs['properties'] = properties_to_fetch
         deals = hubspot.crm.deals.get_all(**kwargs)
-        deals_dict = [
-            {
-                "id": deal.id,
-                "dealname": deal.properties["dealname"],
-                "amount": deal.properties.get("amount", None),
-                "pipeline": deal.properties.get("pipeline", None),
-                "closedate": deal.properties.get("closedate", None),
-                "dealstage": deal.properties.get("dealstage", None),
-                "hubspot_owner_id": deal.properties.get("hubspot_owner_id", None),
-                "createdate": deal.properties["createdate"],
-                "hs_lastmodifieddate": deal.properties["hs_lastmodifieddate"],
-            }
-            for deal in deals
-        ]
+
+        deals_dict = []
+        for deal in deals:
+            # Start with the ID
+            deal_dict = {"id": deal.id}
+
+            # Extract properties that were returned
+            if hasattr(deal, 'properties') and deal.properties:
+                for prop_name, prop_value in deal.properties.items():
+                    deal_dict[prop_name] = prop_value
+
+            deals_dict.append(deal_dict)
+
         return deals_dict
 
     def create_deals(self, deals_data: List[Dict[Text, Any]]) -> None:

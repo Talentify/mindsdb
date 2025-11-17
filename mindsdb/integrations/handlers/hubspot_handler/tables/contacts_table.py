@@ -29,6 +29,13 @@ logger = log.getLogger(__name__)
 class ContactsTable(APITable):
     """Hubspot Contacts table."""
 
+    # Default essential properties to fetch (to avoid overloading with 100+ properties)
+    DEFAULT_PROPERTIES = [
+        'email', 'firstname', 'lastname', 'phone', 'company', 'website',
+        'jobtitle', 'city', 'state', 'country', 'lifecyclestage',
+        'createdate', 'lastmodifieddate'
+    ]
+
     def select(self, query: ast.Select) -> pd.DataFrame:
         """
         Pulls Hubspot Contacts data
@@ -57,7 +64,16 @@ class ContactsTable(APITable):
         )
         selected_columns, where_conditions, order_by_conditions, result_limit = select_statement_parser.parse_query()
 
-        contacts_df = pd.json_normalize(self.get_contacts(limit=result_limit))
+        # Determine which properties to fetch from HubSpot API
+        # If specific columns are requested, fetch only those (+ id)
+        # If SELECT * is used, fetch only default essential properties
+        requested_properties = None
+        if selected_columns and len(selected_columns) > 0:
+            # User requested specific columns - fetch only those
+            requested_properties = [col for col in selected_columns if col != 'id']
+        # else: Will use default properties in get_contacts()
+
+        contacts_df = pd.json_normalize(self.get_contacts(limit=result_limit, properties=requested_properties))
         select_statement_executor = SELECTQueryExecutor(
             contacts_df,
             selected_columns,
@@ -86,9 +102,17 @@ class ContactsTable(APITable):
         ValueError
             If the query contains an unsupported condition
         """
+        # Get dynamic list of supported columns from properties cache
+        try:
+            properties_cache = self.handler.get_properties_cache('contacts')
+            supported_columns = list(properties_cache['property_names'])
+        except Exception as e:
+            logger.warning(f"Failed to get dynamic columns for insert, using minimal set: {e}")
+            supported_columns = ['email', 'firstname', 'lastname', 'phone', 'company', 'website']
+
         insert_statement_parser = INSERTQueryParser(
             query,
-            supported_columns=['email', 'firstname', 'firstname', 'phone', 'company', 'website'],
+            supported_columns=supported_columns,
             mandatory_columns=['email'],
             all_mandatory=False,
         )
@@ -158,25 +182,61 @@ class ContactsTable(APITable):
         self.delete_contacts(contact_ids)
 
     def get_columns(self) -> List[Text]:
-        return pd.json_normalize(self.get_contacts(limit=1)).columns.tolist()
+        """
+        Get column names for the table.
+        Returns default essential properties to avoid overloading with 100+ properties.
+        Users can still query specific custom properties explicitly in SELECT.
+        """
+        # Return id + default essential properties
+        return ['id'] + self.DEFAULT_PROPERTIES
 
-    def get_contacts(self, **kwargs) -> List[Dict]:
+    def get_contacts(self, properties: List[Text] = None, **kwargs) -> List[Dict]:
+        """
+        Fetch contacts with specified properties.
+
+        Parameters
+        ----------
+        properties : List[Text], optional
+            List of property names to fetch. If None, fetches DEFAULT_PROPERTIES.
+            To fetch ALL properties, pass an empty list [].
+        **kwargs : dict
+            Additional arguments to pass to the HubSpot API (e.g., limit)
+
+        Returns
+        -------
+        List[Dict]
+            List of contact dictionaries with requested properties
+        """
         hubspot = self.handler.connect()
+
+        # Determine which properties to request from HubSpot
+        if properties is None:
+            # Default: fetch only essential properties
+            properties_to_fetch = self.DEFAULT_PROPERTIES
+        elif len(properties) == 0:
+            # Empty list means fetch ALL available properties
+            properties_cache = self.handler.get_properties_cache('contacts')
+            properties_to_fetch = list(properties_cache['property_names'])
+        else:
+            # Specific properties requested
+            properties_to_fetch = properties
+
+        # Add properties parameter to API call
+        kwargs['properties'] = properties_to_fetch
         contacts = hubspot.crm.contacts.get_all(**kwargs)
-        contacts_dict = [
-            {
-                "id": contact.id,
-                "email": contact.properties["email"],
-                "firstname": contact.properties.get("firstname", None),
-                "lastname": contact.properties.get("lastname", None),
-                "phone": contact.properties.get("phone", None),
-                "company": contact.properties.get("company", None),
-                "website": contact.properties.get("website", None),
-                "createdate": contact.properties["createdate"],
-                "lastmodifieddate": contact.properties["lastmodifieddate"],
-            }
-            for contact in contacts
-        ]
+
+        contacts_dict = []
+        for contact in contacts:
+            # Start with the ID
+            contact_dict = {"id": contact.id}
+
+            # Extract properties that were returned
+            if hasattr(contact, 'properties') and contact.properties:
+                for prop_name, prop_value in contact.properties.items():
+                    contact_dict[prop_name] = prop_value
+
+            contacts_dict.append(contact_dict)
+
         return contacts_dict
 
     def create_contacts(self, contacts_data: List[Dict[Text, Any]]) -> None:
