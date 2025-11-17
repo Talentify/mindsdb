@@ -77,7 +77,7 @@ class TasksTable(HubSpotSearchMixin, APITable):
             if len(available_columns) < len(selected_columns):
                 missing = set(selected_columns) - set(available_columns)
                 logger.warning(f"Some requested columns not available in tasks data: {missing}")
-            selected_columns = available_columns if available_columns else None
+            selected_columns = available_columns
 
         select_statement_executor = SELECTQueryExecutor(
             tasks_df,

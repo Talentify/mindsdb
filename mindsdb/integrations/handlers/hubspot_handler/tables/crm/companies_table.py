@@ -103,6 +103,15 @@ class CompaniesTable(HubSpotSearchMixin, APITable):
                 self.get_companies(limit=result_limit, properties=requested_properties)
             )
 
+        # Filter selected_columns to only include columns that actually exist in the dataframe
+        # This handles cases where requested properties don't exist in HubSpot
+        if not companies_df.empty and selected_columns:
+            available_columns = [col for col in selected_columns if col in companies_df.columns]
+            if len(available_columns) < len(selected_columns):
+                missing = set(selected_columns) - set(available_columns)
+                logger.warning(f"Some requested columns not available in companies data: {missing}")
+            selected_columns = available_columns
+
         # Apply column selection and ORDER BY
         select_statement_executor = SELECTQueryExecutor(
             companies_df,

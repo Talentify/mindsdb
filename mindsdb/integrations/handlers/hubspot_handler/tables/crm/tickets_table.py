@@ -93,6 +93,15 @@ class TicketsTable(HubSpotSearchMixin, APITable):
                 self.get_tickets(limit=result_limit, properties=requested_properties)
             )
 
+        # Filter selected_columns to only include columns that actually exist in the dataframe
+        # This handles cases where requested properties don't exist in HubSpot
+        if not tickets_df.empty and selected_columns:
+            available_columns = [col for col in selected_columns if col in tickets_df.columns]
+            if len(available_columns) < len(selected_columns):
+                missing = set(selected_columns) - set(available_columns)
+                logger.warning(f"Some requested columns not available in tickets data: {missing}")
+            selected_columns = available_columns
+
         select_statement_executor = SELECTQueryExecutor(
             tickets_df,
             selected_columns,
