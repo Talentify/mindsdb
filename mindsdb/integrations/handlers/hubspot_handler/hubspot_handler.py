@@ -1,6 +1,10 @@
 import time
 from hubspot import HubSpot
 
+from mindsdb.integrations.handlers.hubspot_handler.utils.rate_limiter import (
+    with_retry,
+    handle_hubspot_error
+)
 from mindsdb.integrations.handlers.hubspot_handler.tables.crm.companies_table import CompaniesTable
 from mindsdb.integrations.handlers.hubspot_handler.tables.crm.contacts_table import ContactsTable
 from mindsdb.integrations.handlers.hubspot_handler.tables.crm.deals_table import DealsTable
@@ -105,33 +109,56 @@ class HubspotHandler(APIHandler):
         """Creates a new Hubspot API client if needed and sets it as the client to use for requests.
 
         Returns newly created Hubspot API client, or current client if already set.
+
+        Raises:
+            Exception: If connection fails (invalid token, network issues, etc.)
         """
         if self.is_connected is True:
             return self.connection
 
-        access_token = self.connection_data['access_token']
+        access_token = self.connection_data.get('access_token')
 
-        self.connection = HubSpot(access_token=access_token)
-        self.is_connected = True
+        if not access_token:
+            raise ValueError("HubSpot access token is required. Please provide 'access_token' in connection data.")
+
+        try:
+            self.connection = HubSpot(access_token=access_token)
+            self.is_connected = True
+            logger.info("Successfully connected to HubSpot API")
+        except Exception as e:
+            self.is_connected = False
+            error_message = handle_hubspot_error(e)
+            logger.error(f"Failed to connect to HubSpot: {error_message}")
+            raise Exception(f"HubSpot connection failed: {error_message}") from e
 
         return self.connection
 
     def check_connection(self) -> StatusResponse:
-        """Checks whether the API client is connected to Hubspot.
+        """Checks whether the API client is connected to Hubspot with retry logic.
 
         Returns:
             StatusResponse: A status response indicating whether the API client is connected to Hubspot.
         """
-
         response = StatusResponse(False)
 
+        @with_retry(max_retries=3, backoff_factor=2)
+        def validate_connection():
+            """Validate connection by making a simple API call"""
+            hubspot = self.connect()
+            # Make a simple API call to verify the connection works
+            # Using contacts API as it's available to all access tokens
+            hubspot.crm.contacts.basic_api.get_page(limit=1)
+
         try:
-            self.connect()
+            validate_connection()
             response.success = True
+            logger.info("HubSpot connection validated successfully")
 
         except Exception as e:
-            logger.error(f'Error connecting to Hubspot: {e}')
-            response.error_message = e
+            error_message = handle_hubspot_error(e)
+            logger.error(f'Error connecting to HubSpot: {error_message}')
+            response.error_message = f"Connection failed: {error_message}"
+            response.success = False
 
         self.is_connected = response.success
         return response

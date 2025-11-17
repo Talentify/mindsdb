@@ -1,16 +1,28 @@
 """
-Base class for HubSpot tables with shared search functionality.
+Base class for HubSpot tables with shared search functionality and rate limiting.
 """
-from typing import List, Dict
+from typing import List, Dict, Any, Callable
 from mindsdb.utilities import log
+from mindsdb.integrations.handlers.hubspot_handler.utils.rate_limiter import (
+    with_retry,
+    batch_operation_with_retry,
+    chunk_list,
+    handle_hubspot_error
+)
 
 logger = log.getLogger(__name__)
 
 
 class HubSpotSearchMixin:
     """
-    Mixin class providing shared search functionality for HubSpot tables.
-    This class should be mixed into APITable subclasses for Companies, Contacts, and Deals.
+    Mixin class providing shared search functionality and rate limiting for HubSpot tables.
+    This class should be mixed into APITable subclasses for all HubSpot object types.
+
+    Features:
+    - SQL operator mapping to HubSpot search API
+    - WHERE clause to HubSpot filters conversion
+    - Automatic retry with exponential backoff
+    - Batch operation chunking for large datasets
     """
 
     @staticmethod
@@ -128,3 +140,217 @@ class HubSpotSearchMixin:
                 })
 
         return hubspot_filters
+
+    def _execute_with_retry(self, operation: Callable[[], Any], operation_name: str = "") -> Any:
+        """
+        Execute a HubSpot API operation with automatic retry on rate limits.
+
+        Parameters
+        ----------
+        operation : Callable
+            Function that performs the API call
+        operation_name : str
+            Name of the operation for logging purposes
+
+        Returns
+        -------
+        Any
+            Result from the API operation
+
+        Raises
+        ------
+        RateLimitError
+            If rate limit is exceeded after all retries
+        HubSpotAPIError
+            If API call fails after all retries
+        """
+        @with_retry(max_retries=5)
+        def execute():
+            try:
+                return operation()
+            except Exception as e:
+                error_message = handle_hubspot_error(e)
+                logger.error(f"HubSpot API error in {operation_name}: {error_message}")
+                raise
+
+        return execute()
+
+    def _batch_create_with_chunking(
+        self,
+        items: List[Dict[str, Any]],
+        create_func: Callable[[List], Any],
+        item_name: str = "items"
+    ) -> None:
+        """
+        Create items in batches with automatic chunking and retry.
+
+        Parameters
+        ----------
+        items : List[Dict[str, Any]]
+            List of items to create
+        create_func : Callable
+            Function that creates a batch of items
+        item_name : str
+            Name of items for logging (e.g., "contacts", "deals")
+
+        Raises
+        ------
+        Exception
+            If any batch fails after retries
+        """
+        if not items:
+            logger.info(f"No {item_name} to create")
+            return
+
+        if len(items) <= 100:
+            # Small batch, execute directly with retry
+            self._execute_with_retry(
+                lambda: create_func(items),
+                f"create_{item_name}"
+            )
+            logger.info(f"Created {len(items)} {item_name}")
+        else:
+            # Large batch, use chunking
+            logger.info(f"Creating {len(items)} {item_name} in multiple batches...")
+
+            result = batch_operation_with_retry(
+                create_func,
+                items,
+                batch_size=100,
+                max_retries=5
+            )
+
+            if result['failed_count'] > 0:
+                logger.warning(
+                    f"Created {result['succeeded_count']}/{result['total']} {item_name}. "
+                    f"{result['failed_count']} failed."
+                )
+                raise Exception(
+                    f"{item_name.capitalize()} creation partially failed: "
+                    f"{result['failed_count']}/{result['total']} {item_name} failed to create"
+                )
+            else:
+                logger.info(f"Successfully created all {result['total']} {item_name}")
+
+    def _batch_update_with_chunking(
+        self,
+        item_ids: List[str],
+        values_to_update: Dict[str, Any],
+        update_func: Callable[[List], Any],
+        item_name: str = "items"
+    ) -> None:
+        """
+        Update items in batches with automatic chunking and retry.
+
+        Parameters
+        ----------
+        item_ids : List[str]
+            List of item IDs to update
+        values_to_update : Dict[str, Any]
+            Property values to update
+        update_func : Callable
+            Function that updates a batch of items
+        item_name : str
+            Name of items for logging
+
+        Raises
+        ------
+        Exception
+            If any batch fails after retries
+        """
+        if not item_ids:
+            logger.info(f"No {item_name} to update")
+            return
+
+        if len(item_ids) <= 100:
+            # Small batch, execute directly with retry
+            self._execute_with_retry(
+                lambda: update_func(item_ids, values_to_update),
+                f"update_{item_name}"
+            )
+            logger.info(f"Updated {len(item_ids)} {item_name}")
+        else:
+            # Large batch, use chunking
+            logger.info(f"Updating {len(item_ids)} {item_name} in multiple batches...")
+
+            chunks = chunk_list(item_ids, chunk_size=100)
+            failed_chunks = []
+
+            for i, chunk in enumerate(chunks, 1):
+                try:
+                    self._execute_with_retry(
+                        lambda: update_func(chunk, values_to_update),
+                        f"update_{item_name}_batch_{i}"
+                    )
+                    logger.debug(f"Updated batch {i}/{len(chunks)} ({len(chunk)} {item_name})")
+                except Exception as e:
+                    logger.error(f"Failed to update batch {i}/{len(chunks)}: {e}")
+                    failed_chunks.append(i)
+
+            if failed_chunks:
+                raise Exception(
+                    f"{item_name.capitalize()} update partially failed: "
+                    f"{len(failed_chunks)} batch(es) failed (batches: {failed_chunks})"
+                )
+            else:
+                logger.info(f"Successfully updated all {len(item_ids)} {item_name}")
+
+    def _batch_delete_with_chunking(
+        self,
+        item_ids: List[str],
+        delete_func: Callable[[List], Any],
+        item_name: str = "items"
+    ) -> None:
+        """
+        Delete (archive) items in batches with automatic chunking and retry.
+
+        Parameters
+        ----------
+        item_ids : List[str]
+            List of item IDs to delete
+        delete_func : Callable
+            Function that deletes a batch of items
+        item_name : str
+            Name of items for logging
+
+        Raises
+        ------
+        Exception
+            If any batch fails after retries
+        """
+        if not item_ids:
+            logger.info(f"No {item_name} to delete")
+            return
+
+        if len(item_ids) <= 100:
+            # Small batch, execute directly with retry
+            self._execute_with_retry(
+                lambda: delete_func(item_ids),
+                f"delete_{item_name}"
+            )
+            logger.info(f"Deleted {len(item_ids)} {item_name}")
+        else:
+            # Large batch, use chunking
+            logger.info(f"Deleting {len(item_ids)} {item_name} in multiple batches...")
+
+            chunks = chunk_list(item_ids, chunk_size=100)
+            failed_chunks = []
+
+            for i, chunk in enumerate(chunks, 1):
+                try:
+                    self._execute_with_retry(
+                        lambda: delete_func(chunk),
+                        f"delete_{item_name}_batch_{i}"
+                    )
+                    logger.debug(f"Deleted batch {i}/{len(chunks)} ({len(chunk)} {item_name})")
+                except Exception as e:
+                    logger.error(f"Failed to delete batch {i}/{len(chunks)}: {e}")
+                    failed_chunks.append(i)
+
+            if failed_chunks:
+                raise Exception(
+                    f"{item_name.capitalize()} deletion partially failed: "
+                    f"{len(failed_chunks)} batch(es) failed (batches: {failed_chunks})"
+                )
+            else:
+                logger.info(f"Successfully deleted all {len(item_ids)} {item_name}")
