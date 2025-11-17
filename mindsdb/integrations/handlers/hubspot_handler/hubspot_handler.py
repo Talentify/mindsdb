@@ -1,10 +1,10 @@
 import time
 from hubspot import HubSpot
 
-from mindsdb.integrations.handlers.hubspot_handler.tables.companies_table import CompaniesTable
-from mindsdb.integrations.handlers.hubspot_handler.tables.contacts_table import ContactsTable
-from mindsdb.integrations.handlers.hubspot_handler.tables.deals_table import DealsTable
-from mindsdb.integrations.handlers.hubspot_handler.tables.properties_table import PropertiesTable
+from mindsdb.integrations.handlers.hubspot_handler.tables.crm.companies_table import CompaniesTable
+from mindsdb.integrations.handlers.hubspot_handler.tables.crm.contacts_table import ContactsTable
+from mindsdb.integrations.handlers.hubspot_handler.tables.crm.deals_table import DealsTable
+from mindsdb.integrations.handlers.hubspot_handler.tables.crm.properties_table import PropertiesTable
 
 from mindsdb.integrations.libs.api_handler import APIHandler
 from mindsdb.integrations.libs.response import (

@@ -21,7 +21,7 @@ from mindsdb.integrations.utilities.handlers.query_utilities import (
     DELETEQueryExecutor,
 )
 from mindsdb.utilities import log
-from mindsdb.integrations.handlers.hubspot_handler.tables.base_hubspot_table import HubSpotSearchMixin
+from mindsdb.integrations.handlers.hubspot_handler.tables.crm.base_hubspot_table import HubSpotSearchMixin
 
 logger = log.getLogger(__name__)
 
