@@ -19,6 +19,9 @@ from mindsdb.integrations.handlers.hubspot_handler.tables.crm.meetings_table imp
 from mindsdb.integrations.handlers.hubspot_handler.tables.crm.notes_table import NotesTable
 from mindsdb.integrations.handlers.hubspot_handler.tables.crm.tasks_table import TasksTable
 from mindsdb.integrations.handlers.hubspot_handler.tables.crm.leads_table import LeadsTable
+from mindsdb.integrations.handlers.hubspot_handler.tables.crm.owners_table import OwnersTable
+from mindsdb.integrations.handlers.hubspot_handler.tables.crm.pipelines_table import PipelinesTable
+from mindsdb.integrations.handlers.hubspot_handler.tables.crm.associations_table import AssociationsTable
 
 from mindsdb.integrations.libs.api_handler import APIHandler
 from mindsdb.integrations.libs.response import (
@@ -101,9 +104,19 @@ class HubspotHandler(APIHandler):
         tasks_data = TasksTable(self)
         self._register_table("tasks", tasks_data)
 
-        # Metadata
+        # Metadata and Configuration
         properties_data = PropertiesTable(self)
         self._register_table("properties", properties_data)
+
+        owners_data = OwnersTable(self)
+        self._register_table("owners", owners_data)
+
+        pipelines_data = PipelinesTable(self)
+        self._register_table("pipelines", pipelines_data)
+
+        # Associations (Relationships)
+        associations_data = AssociationsTable(self)
+        self._register_table("associations", associations_data)
 
     def connect(self) -> HubSpot:
         """Creates a new Hubspot API client if needed and sets it as the client to use for requests.
