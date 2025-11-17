@@ -21,11 +21,12 @@ from mindsdb.integrations.utilities.handlers.query_utilities import (
     DELETEQueryExecutor,
 )
 from mindsdb.utilities import log
+from mindsdb.integrations.handlers.hubspot_handler.tables.base_hubspot_table import HubSpotSearchMixin
 
 logger = log.getLogger(__name__)
 
 
-class DealsTable(APITable):
+class DealsTable(HubSpotSearchMixin, APITable):
     """Hubspot Deals table."""
 
     # Default essential properties to fetch (to avoid overloading with 100+ properties)
@@ -64,15 +65,34 @@ class DealsTable(APITable):
         selected_columns, where_conditions, order_by_conditions, result_limit = select_statement_parser.parse_query()
 
         # Determine which properties to fetch from HubSpot API
-        # If specific columns are requested, fetch only those (+ id)
-        # If SELECT * is used, fetch only default essential properties
         requested_properties = None
         if selected_columns and len(selected_columns) > 0:
-            # User requested specific columns - fetch only those
             requested_properties = [col for col in selected_columns if col != 'id']
-        # else: Will use default properties in get_deals()
 
-        deals_df = pd.json_normalize(self.get_deals(limit=result_limit, properties=requested_properties))
+        # Check if WHERE conditions exist - use search API if they do
+        if where_conditions and len(where_conditions) > 0:
+            hubspot_filters = self._build_search_filters(where_conditions)
+
+            if hubspot_filters:
+                logger.info(f"Using HubSpot search API with {len(hubspot_filters)} filter(s)")
+                deals_df = pd.json_normalize(
+                    self.search_deals(
+                        filters=hubspot_filters,
+                        properties=requested_properties,
+                        limit=result_limit
+                    )
+                )
+                where_conditions = []
+            else:
+                logger.info("No valid HubSpot filters, using get_all")
+                deals_df = pd.json_normalize(
+                    self.get_deals(limit=result_limit, properties=requested_properties)
+                )
+        else:
+            deals_df = pd.json_normalize(
+                self.get_deals(limit=result_limit, properties=requested_properties)
+            )
+
         select_statement_executor = SELECTQueryExecutor(
             deals_df,
             selected_columns,
@@ -237,6 +257,85 @@ class DealsTable(APITable):
             deals_dict.append(deal_dict)
 
         return deals_dict
+
+    def search_deals(self, filters: List[Dict], properties: List[Text] = None, limit: int = None) -> List[Dict]:
+        """
+        Search deals using HubSpot search API with filters.
+
+        Parameters
+        ----------
+        filters : List[Dict]
+            List of HubSpot filter dictionaries
+        properties : List[Text], optional
+            List of property names to fetch. If None, fetches DEFAULT_PROPERTIES.
+        limit : int, optional
+            Maximum number of results to return
+
+        Returns
+        -------
+        List[Dict]
+            List of deal dictionaries matching the filters
+        """
+        hubspot = self.handler.connect()
+
+        # Determine which properties to request
+        if properties is None:
+            properties_to_fetch = self.DEFAULT_PROPERTIES
+        elif len(properties) == 0:
+            properties_cache = self.handler.get_properties_cache('deals')
+            properties_to_fetch = list(properties_cache['property_names'])
+        else:
+            properties_to_fetch = properties
+
+        # Build search request
+        search_request = {
+            "filterGroups": [{"filters": filters}],
+            "properties": properties_to_fetch,
+            "limit": min(limit or 100, 100),
+        }
+
+        # Pagination to fetch all results
+        all_deals = []
+        after = 0
+
+        try:
+            while True:
+                if after > 0:
+                    search_request["after"] = after
+
+                # Call HubSpot search API
+                response = hubspot.crm.deals.search_api.do_search(
+                    public_object_search_request=search_request
+                )
+
+                # Extract deals from response
+                for deal in response.results:
+                    deal_dict = {"id": deal.id}
+                    if hasattr(deal, 'properties') and deal.properties:
+                        for prop_name, prop_value in deal.properties.items():
+                            deal_dict[prop_name] = prop_value
+                    all_deals.append(deal_dict)
+
+                # Check if we've reached the limit
+                if limit and len(all_deals) >= limit:
+                    all_deals = all_deals[:limit]
+                    break
+
+                # Check if there are more results
+                if not hasattr(response, 'paging') or not response.paging:
+                    break
+
+                if hasattr(response.paging, 'next') and response.paging.next:
+                    after = response.paging.next.after
+                else:
+                    break
+
+        except Exception as e:
+            logger.error(f"Error searching deals: {e}")
+            raise Exception(f"Deal search failed: {e}")
+
+        logger.info(f"Found {len(all_deals)} deals matching filters")
+        return all_deals
 
     def create_deals(self, deals_data: List[Dict[Text, Any]]) -> None:
         hubspot = self.handler.connect()

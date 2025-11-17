@@ -21,12 +21,13 @@ from mindsdb.integrations.utilities.handlers.query_utilities import (
     DELETEQueryExecutor,
 )
 from mindsdb.utilities import log
+from mindsdb.integrations.handlers.hubspot_handler.tables.base_hubspot_table import HubSpotSearchMixin
 
 
 logger = log.getLogger(__name__)
 
 
-class ContactsTable(APITable):
+class ContactsTable(HubSpotSearchMixin, APITable):
     """Hubspot Contacts table."""
 
     # Default essential properties to fetch (to avoid overloading with 100+ properties)
@@ -65,15 +66,34 @@ class ContactsTable(APITable):
         selected_columns, where_conditions, order_by_conditions, result_limit = select_statement_parser.parse_query()
 
         # Determine which properties to fetch from HubSpot API
-        # If specific columns are requested, fetch only those (+ id)
-        # If SELECT * is used, fetch only default essential properties
         requested_properties = None
         if selected_columns and len(selected_columns) > 0:
-            # User requested specific columns - fetch only those
             requested_properties = [col for col in selected_columns if col != 'id']
-        # else: Will use default properties in get_contacts()
 
-        contacts_df = pd.json_normalize(self.get_contacts(limit=result_limit, properties=requested_properties))
+        # Check if WHERE conditions exist - use search API if they do
+        if where_conditions and len(where_conditions) > 0:
+            hubspot_filters = self._build_search_filters(where_conditions)
+
+            if hubspot_filters:
+                logger.info(f"Using HubSpot search API with {len(hubspot_filters)} filter(s)")
+                contacts_df = pd.json_normalize(
+                    self.search_contacts(
+                        filters=hubspot_filters,
+                        properties=requested_properties,
+                        limit=result_limit
+                    )
+                )
+                where_conditions = []
+            else:
+                logger.info("No valid HubSpot filters, using get_all")
+                contacts_df = pd.json_normalize(
+                    self.get_contacts(limit=result_limit, properties=requested_properties)
+                )
+        else:
+            contacts_df = pd.json_normalize(
+                self.get_contacts(limit=result_limit, properties=requested_properties)
+            )
+
         select_statement_executor = SELECTQueryExecutor(
             contacts_df,
             selected_columns,
@@ -238,6 +258,85 @@ class ContactsTable(APITable):
             contacts_dict.append(contact_dict)
 
         return contacts_dict
+
+    def search_contacts(self, filters: List[Dict], properties: List[Text] = None, limit: int = None) -> List[Dict]:
+        """
+        Search contacts using HubSpot search API with filters.
+
+        Parameters
+        ----------
+        filters : List[Dict]
+            List of HubSpot filter dictionaries
+        properties : List[Text], optional
+            List of property names to fetch. If None, fetches DEFAULT_PROPERTIES.
+        limit : int, optional
+            Maximum number of results to return
+
+        Returns
+        -------
+        List[Dict]
+            List of contact dictionaries matching the filters
+        """
+        hubspot = self.handler.connect()
+
+        # Determine which properties to request
+        if properties is None:
+            properties_to_fetch = self.DEFAULT_PROPERTIES
+        elif len(properties) == 0:
+            properties_cache = self.handler.get_properties_cache('contacts')
+            properties_to_fetch = list(properties_cache['property_names'])
+        else:
+            properties_to_fetch = properties
+
+        # Build search request
+        search_request = {
+            "filterGroups": [{"filters": filters}],
+            "properties": properties_to_fetch,
+            "limit": min(limit or 100, 100),
+        }
+
+        # Pagination to fetch all results
+        all_contacts = []
+        after = 0
+
+        try:
+            while True:
+                if after > 0:
+                    search_request["after"] = after
+
+                # Call HubSpot search API
+                response = hubspot.crm.contacts.search_api.do_search(
+                    public_object_search_request=search_request
+                )
+
+                # Extract contacts from response
+                for contact in response.results:
+                    contact_dict = {"id": contact.id}
+                    if hasattr(contact, 'properties') and contact.properties:
+                        for prop_name, prop_value in contact.properties.items():
+                            contact_dict[prop_name] = prop_value
+                    all_contacts.append(contact_dict)
+
+                # Check if we've reached the limit
+                if limit and len(all_contacts) >= limit:
+                    all_contacts = all_contacts[:limit]
+                    break
+
+                # Check if there are more results
+                if not hasattr(response, 'paging') or not response.paging:
+                    break
+
+                if hasattr(response.paging, 'next') and response.paging.next:
+                    after = response.paging.next.after
+                else:
+                    break
+
+        except Exception as e:
+            logger.error(f"Error searching contacts: {e}")
+            raise Exception(f"Contact search failed: {e}")
+
+        logger.info(f"Found {len(all_contacts)} contacts matching filters")
+        return all_contacts
 
     def create_contacts(self, contacts_data: List[Dict[Text, Any]]) -> None:
         hubspot = self.handler.connect()
