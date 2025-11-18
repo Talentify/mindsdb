@@ -10,12 +10,13 @@ Documentation: https://developers.hubspot.com/docs/api/crm/associations
 Supports full CRUD operations for managing associations between CRM objects.
 """
 
-from typing import List, Dict, Text, Any, Tuple
+from typing import List, Dict, Text, Any, Tuple, Optional
 import pandas as pd
+from mindsdb_sql_parser import ast
 from mindsdb.integrations.libs.api_handler import APITable
-from mindsdb.integrations.handlers.hubspot_handler.tables.crm.base_hubspot_table import HubSpotSearchMixin
+from mindsdb.integrations.utilities.handlers.query_utilities import SELECTQueryParser, DELETEQueryParser
 from mindsdb.utilities import log
-from mindsdb_sql.parser import ast
+from mindsdb.integrations.handlers.hubspot_handler.tables.crm.base_hubspot_table import HubSpotSearchMixin
 
 logger = log.getLogger(__name__)
 
@@ -88,19 +89,13 @@ class AssociationsTable(HubSpotSearchMixin, APITable):
         pd.DataFrame
             Associations data
         """
-        # Parse query conditions
-        conditions = self._extract_where_conditions(query.where) if query.where else []
-        limit = query.limit.value if query.limit else None
-
-        # Get requested columns
-        selected_columns = []
-        if query.targets:
-            for target in query.targets:
-                if isinstance(target, ast.Star):
-                    selected_columns = None  # SELECT * - get all columns
-                    break
-                elif isinstance(target, ast.Identifier):
-                    selected_columns.append(target.parts[-1])
+        # Use SELECTQueryParser to properly parse the query
+        select_statement_parser = SELECTQueryParser(
+            query,
+            "associations",
+            self.get_columns()
+        )
+        selected_columns, where_conditions, order_by_conditions, result_limit = select_statement_parser.parse_query()
 
         # Extract required parameters from WHERE clause
         from_object_type = None
@@ -108,7 +103,7 @@ class AssociationsTable(HubSpotSearchMixin, APITable):
         to_object_type = None
         to_object_ids = []
 
-        for condition in conditions:
+        for condition in where_conditions:
             if len(condition) < 3:
                 continue
 
@@ -157,8 +152,8 @@ class AssociationsTable(HubSpotSearchMixin, APITable):
         associations_df = pd.DataFrame(associations)
 
         # Apply additional WHERE conditions (like to_object_id filter)
-        if conditions and not associations_df.empty:
-            associations_df = self._apply_conditions(associations_df, conditions)
+        if where_conditions and not associations_df.empty:
+            associations_df = self._apply_conditions(associations_df, where_conditions)
 
         # Apply column selection
         if selected_columns and not associations_df.empty:
@@ -171,8 +166,8 @@ class AssociationsTable(HubSpotSearchMixin, APITable):
                 associations_df = associations_df[available_columns]
 
         # Apply limit
-        if limit and not associations_df.empty:
-            associations_df = associations_df.head(limit)
+        if result_limit and not associations_df.empty:
+            associations_df = associations_df.head(result_limit)
 
         logger.info(f"Returning {len(associations_df)} associations")
         return associations_df
@@ -181,7 +176,7 @@ class AssociationsTable(HubSpotSearchMixin, APITable):
         self,
         from_object_type: str,
         from_object_ids: List[str],
-        to_object_type: str = None
+        to_object_type: Optional[str] = None
     ) -> List[Dict]:
         """
         Get associations for specified objects.
@@ -417,7 +412,8 @@ class AssociationsTable(HubSpotSearchMixin, APITable):
                 "to_object_type, and to_object_id"
             )
 
-        conditions = self._extract_where_conditions(query.where)
+        delete_statement_parser = DELETEQueryParser(query)
+        where_conditions = delete_statement_parser.parse_query()
 
         # Extract parameters
         from_object_type = None
@@ -425,7 +421,7 @@ class AssociationsTable(HubSpotSearchMixin, APITable):
         to_object_type = None
         to_object_ids = []
 
-        for condition in conditions:
+        for condition in where_conditions:
             if len(condition) < 3:
                 continue
 
@@ -452,6 +448,10 @@ class AssociationsTable(HubSpotSearchMixin, APITable):
                 "DELETE requires from_object_type, from_object_id, to_object_type, "
                 "and to_object_id in WHERE clause"
             )
+
+        # Type assertions for mypy - we've validated these are not None above
+        assert from_object_type is not None
+        assert to_object_type is not None
 
         self.delete_associations(from_object_type, from_object_ids, to_object_type, to_object_ids)
 
@@ -507,35 +507,6 @@ class AssociationsTable(HubSpotSearchMixin, APITable):
         )
 
         logger.info(f"Deleted associations from {from_object_type} to {to_object_type}")
-
-    @staticmethod
-    def _extract_where_conditions(where_clause) -> List[List]:
-        """Extract WHERE conditions from SQL query"""
-        conditions = []
-
-        if not where_clause:
-            return conditions
-
-        def parse_condition(node):
-            if isinstance(node, ast.BinaryOperation):
-                if node.op in ['and', 'or']:
-                    # Handle AND/OR - recursively parse both sides
-                    parse_condition(node.args[0])
-                    parse_condition(node.args[1])
-                else:
-                    # Handle comparison operators
-                    if isinstance(node.args[0], ast.Identifier) and isinstance(node.args[1], (ast.Constant, ast.Parameter)):
-                        column = node.args[0].parts[-1]
-                        value = node.args[1].value
-                        conditions.append([node.op, column, value])
-            elif isinstance(node, ast.UnaryOperation):
-                # Handle IS NULL, IS NOT NULL, etc.
-                if isinstance(node.args[0], ast.Identifier):
-                    column = node.args[0].parts[-1]
-                    conditions.append([node.op, column, None])
-
-        parse_condition(where_clause)
-        return conditions
 
     @staticmethod
     def _apply_conditions(df: pd.DataFrame, conditions: List[List]) -> pd.DataFrame:

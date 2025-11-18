@@ -13,10 +13,10 @@ Note: This is a READ-ONLY table. Pipelines are managed through HubSpot's pipelin
 from typing import List, Dict, Text, Any
 import pandas as pd
 import json
+from mindsdb_sql_parser import ast
 from mindsdb.integrations.libs.api_handler import APITable
 from mindsdb.integrations.handlers.hubspot_handler.tables.crm.base_hubspot_table import HubSpotSearchMixin
 from mindsdb.utilities import log
-from mindsdb_sql.parser import ast
 
 logger = log.getLogger(__name__)
 

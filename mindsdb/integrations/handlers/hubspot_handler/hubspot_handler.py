@@ -21,6 +21,7 @@ from mindsdb.integrations.handlers.hubspot_handler.tables.crm.tasks_table import
 from mindsdb.integrations.handlers.hubspot_handler.tables.crm.leads_table import LeadsTable
 from mindsdb.integrations.handlers.hubspot_handler.tables.crm.owners_table import OwnersTable
 from mindsdb.integrations.handlers.hubspot_handler.tables.crm.pipelines_table import PipelinesTable
+from mindsdb.integrations.handlers.hubspot_handler.tables.crm.pipeline_stages_table import PipelineStagesTable
 from mindsdb.integrations.handlers.hubspot_handler.tables.crm.associations_table import AssociationsTable
 
 from mindsdb.integrations.libs.api_handler import APIHandler
@@ -113,6 +114,9 @@ class HubspotHandler(APIHandler):
 
         pipelines_data = PipelinesTable(self)
         self._register_table("pipelines", pipelines_data)
+
+        pipeline_stages_data = PipelineStagesTable(self)
+        self._register_table("pipeline_stages", pipeline_stages_data)
 
         # Associations (Relationships)
         associations_data = AssociationsTable(self)

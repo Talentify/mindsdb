@@ -12,10 +12,10 @@ Note: This is a READ-ONLY table. Owners are managed through HubSpot's user manag
 
 from typing import List, Dict, Text, Any
 import pandas as pd
+from mindsdb_sql_parser import ast
 from mindsdb.integrations.libs.api_handler import APITable
 from mindsdb.integrations.handlers.hubspot_handler.tables.crm.base_hubspot_table import HubSpotSearchMixin
 from mindsdb.utilities import log
-from mindsdb_sql.parser import ast
 
 logger = log.getLogger(__name__)
 
@@ -126,9 +126,9 @@ class OwnersTable(HubSpotSearchMixin, APITable):
         try:
             # Get owners with retry logic
             response = self._execute_with_retry(
-                lambda: hubspot.crm.owners.get_page(
-                    email=email,
-                    archived=archived
+                lambda: hubspot.crm.owners.owners_api.get_page(
+                    limit=100,
+                    archived=archived if archived is not None else False
                 ),
                 "get_owners"
             )
