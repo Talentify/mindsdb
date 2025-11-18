@@ -17,6 +17,10 @@ from mindsdb.integrations.libs.api_handler import APITable
 from mindsdb.integrations.utilities.handlers.query_utilities import SELECTQueryParser, DELETEQueryParser
 from mindsdb.utilities import log
 from mindsdb.integrations.handlers.hubspot_handler.tables.crm.base_hubspot_table import HubSpotSearchMixin
+from hubspot.crm.associations.v4 import (
+    BatchInputPublicFetchAssociationsBatchRequest,
+    PublicFetchAssociationsBatchRequest
+)
 
 logger = log.getLogger(__name__)
 
@@ -147,13 +151,36 @@ class AssociationsTable(HubSpotSearchMixin, APITable):
         # Convert to DataFrame
         if not associations:
             logger.info("No associations found")
-            return pd.DataFrame()
+            # Return empty DataFrame with correct column schema
+            return pd.DataFrame(columns=self.get_columns())
 
         associations_df = pd.DataFrame(associations)
 
-        # Apply additional WHERE conditions (like to_object_id filter)
+        # Apply additional WHERE conditions that weren't used in the API query
+        # We need to exclude conditions already applied at the API level:
+        # - from_object_type (always used)
+        # - from_object_id (always used)
+        # - to_object_type (used if specified)
         if where_conditions and not associations_df.empty:
-            associations_df = self._apply_conditions(associations_df, where_conditions)
+            # Filter out conditions already applied at API level
+            conditions_to_apply = []
+            for condition in where_conditions:
+                if len(condition) < 3:
+                    continue
+
+                op, column, value = condition[0], condition[1], condition[2]
+
+                # Skip conditions already used for API filtering
+                if column == 'from_object_type' or column == 'from_object_id':
+                    continue  # Already filtered by API
+                if column == 'to_object_type' and to_object_type:
+                    continue  # Already filtered by API
+
+                # Keep other conditions for local filtering (e.g., to_object_id, association_type_id)
+                conditions_to_apply.append(condition)
+
+            if conditions_to_apply:
+                associations_df = self._apply_conditions(associations_df, conditions_to_apply)
 
         # Apply column selection
         if selected_columns and not associations_df.empty:
@@ -215,16 +242,20 @@ class AssociationsTable(HubSpotSearchMixin, APITable):
                     continue
 
                 try:
-                    # Batch read associations
-                    batch_read_input = {
-                        'inputs': [{'id': str(obj_id)} for obj_id in from_object_ids]
-                    }
+                    # Batch read associations using get_page
+                    # Note: HubSpot v4 associations API uses get_page method for batch reads
+                    # Create proper batch request with PublicFetchAssociationsBatchRequest objects
+                    inputs = [
+                        PublicFetchAssociationsBatchRequest(id=str(obj_id))
+                        for obj_id in from_object_ids
+                    ]
+                    batch_read_input = BatchInputPublicFetchAssociationsBatchRequest(inputs=inputs)
 
                     response = self._execute_with_retry(
-                        lambda: hubspot.crm.associations.v4.batch_api.read(
+                        lambda: hubspot.crm.associations.v4.batch_api.get_page(
                             from_object_type=from_object_type,
                             to_object_type=to_type,
-                            batch_input_public_object_id=batch_read_input
+                            batch_input_public_fetch_associations_batch_request=batch_read_input
                         ),
                         f"get_associations_{from_object_type}_to_{to_type}"
                     )
