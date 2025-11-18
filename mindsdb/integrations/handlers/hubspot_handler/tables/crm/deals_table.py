@@ -351,7 +351,7 @@ class DealsTable(HubSpotSearchMixin, APITable):
         deals_to_create = [HubSpotObjectInputCreate(properties=deal) for deal in deals_data]
         try:
             created_deals = hubspot.crm.deals.batch_api.create(
-                HubSpotBatchObjectBatchInput(inputs=deals_to_create),
+                HubSpotBatchObjectInputCreate(inputs=deals_to_create),
             )
             logger.info(f"Deals created with ID's {[created_deal.id for created_deal in created_deals.results]}")
         except Exception as e:
