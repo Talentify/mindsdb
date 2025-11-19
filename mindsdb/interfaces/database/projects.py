@@ -8,7 +8,7 @@ import sqlalchemy as sa
 import numpy as np
 
 from mindsdb_sql_parser.ast.base import ASTNode
-from mindsdb_sql_parser.ast import Select, Star, Constant, Identifier, BinaryOperation
+from mindsdb_sql_parser.ast import Select, Star, Constant, Identifier, BinaryOperation, Function
 from mindsdb_sql_parser import parse_sql
 
 from mindsdb.interfaces.storage import db
@@ -138,6 +138,47 @@ class Project:
         return view_meta
 
     @staticmethod
+    def _has_aggregates_or_groupby(query: Select) -> bool:
+        """
+        Check if a query contains aggregate functions or GROUP BY clause.
+        Aggregate functions should not be pushed into the view query.
+        """
+        # Check for GROUP BY clause
+        if query.group_by is not None and len(query.group_by) > 0:
+            return True
+
+        # Check if any target contains an aggregate function
+        def has_aggregate_func(node):
+            if isinstance(node, Function):
+                # Common SQL aggregate functions
+                aggregate_funcs = {'sum', 'count', 'avg', 'min', 'max', 'stddev', 'variance',
+                                   'group_concat', 'string_agg', 'array_agg', 'json_agg'}
+                if node.op.lower() in aggregate_funcs:
+                    return True
+                # Recursively check function arguments
+                for arg in node.args:
+                    if has_aggregate_func(arg):
+                        return True
+            elif isinstance(node, (list, tuple)):
+                for item in node:
+                    if has_aggregate_func(item):
+                        return True
+            elif hasattr(node, '__dict__'):
+                # Check all attributes of AST nodes
+                for attr_value in node.__dict__.values():
+                    if has_aggregate_func(attr_value):
+                        return True
+            return False
+
+        # Check all targets
+        if query.targets:
+            for target in query.targets:
+                if has_aggregate_func(target):
+                    return True
+
+        return False
+
+    @staticmethod
     def combine_view_select(view_query: Select, query: Select) -> Select:
         """
         Create a combined query from view's query and outer query.
@@ -226,9 +267,13 @@ class Project:
 
         # If the outer query has specific targets (not Star), propagate them to the view query
         # This ensures that when the query is flattened/optimized, the column selection is preserved
+        # However, do NOT push aggregate functions or GROUP BY queries into the view query,
+        # as this would cause double aggregation errors
         if query.targets and not any(isinstance(t, Star) for t in query.targets):
-            # Replace view's Star(*) with the user's specific column selection
-            view_query.targets = deepcopy(query.targets)
+            # Only push targets if they don't contain aggregates or GROUP BY
+            if not Project._has_aggregates_or_groupby(query):
+                # Replace view's Star(*) with the user's specific column selection
+                view_query.targets = deepcopy(query.targets)
 
         # Move ORDER BY, LIMIT, and OFFSET into view query to avoid redundant post-processing
         # This optimization allows handlers to receive these clauses directly
