@@ -140,6 +140,12 @@ class S3Handler(APIHandler):
         # Connect to S3 via DuckDB.
         duckdb_conn = duckdb.connect(":memory:")
 
+        # Install and load the httpfs extension
+        try:
+            duckdb_conn.execute("INSTALL httpfs")
+        except Exception:
+            # Extension might already be installed
+            pass
         duckdb_conn.execute("LOAD httpfs")
 
         # detect region for bucket
