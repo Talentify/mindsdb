@@ -128,6 +128,14 @@ class AssociationsTable(HubSpotSearchMixin, APITable):
                 elif op == 'in':
                     to_object_ids = value if isinstance(value, list) else [value]
 
+        # Check if this is a validation/schema discovery query
+        # These queries typically have LIMIT 1 and missing required params (during view creation)
+        is_validation_query = (result_limit == 1 and (not from_object_type or not from_object_ids))
+
+        if is_validation_query:
+            logger.debug("Schema validation mode detected, returning empty DataFrame with schema")
+            return pd.DataFrame(columns=self.get_columns())
+
         # Validate required parameters
         if not from_object_type:
             raise ValueError(
