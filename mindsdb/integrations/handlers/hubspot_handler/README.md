@@ -29,9 +29,25 @@ This handler was implemented using [hubspot-api-client
 
 ## HubSpot Handler Initialization
 
-The HubSpot handler is initialized with the following parameters:
+The HubSpot handler supports OAuth2 authentication with token injection and automatic token refresh.
 
-- `access_token`: a HubSpot access token. You can find your access token in the HubSpot Private Apps Page. [Read more](https://developers.hubspot.com/docs/api/private-apps).
+### Authentication Parameters
+
+#### Required (at least one must be provided):
+- `access_token`: HubSpot OAuth2 access token for API authentication
+- `refresh_token`: HubSpot OAuth2 refresh token for automatic token refresh
+
+#### Optional (recommended for token refresh):
+- `client_id`: OAuth2 application client ID (required for automatic token refresh)
+- `client_secret`: OAuth2 application client secret (required for automatic token refresh)
+- `hub_id`: HubSpot Hub ID (Portal ID). If not provided, will be automatically extracted from token info
+
+#### OAuth Application Setup
+To use OAuth authentication, you need to create an OAuth app in HubSpot:
+1. Go to your HubSpot account settings
+2. Navigate to "Integrations" > "Private Apps" or create an OAuth app
+3. Obtain your `client_id`, `client_secret`, `access_token`, and `refresh_token`
+4. [Read more about HubSpot OAuth](https://developers.hubspot.com/docs/api/oauth-quickstart-guide)
 
 ## Implemented Features
 
@@ -71,15 +87,40 @@ The HubSpot handler is initialized with the following parameters:
 
 ## Example Usage
 
-The first step is to create a database with the new `hubspot` engine by passing in the required `access_token` parameter:
+### Method 1: OAuth with Automatic Token Refresh (Recommended)
+
+Create a database connection with OAuth tokens and automatic refresh capability:
 
 ~~~~sql
 CREATE DATABASE hubspot_datasource
 WITH ENGINE = 'hubspot',
 PARAMETERS = {
-  "access_token": "..."
+  "access_token": "your_access_token",
+  "refresh_token": "your_refresh_token",
+  "client_id": "your_client_id",
+  "client_secret": "your_client_secret",
+  "hub_id": "your_hub_id"  -- Optional
 };
 ~~~~
+
+**Benefits:**
+- Tokens are automatically refreshed when they expire
+- Tokens are securely stored and persisted across sessions
+- No manual token management required
+
+### Method 2: Access Token Only (Legacy)
+
+Create a database connection with just an access token:
+
+~~~~sql
+CREATE DATABASE hubspot_datasource
+WITH ENGINE = 'hubspot',
+PARAMETERS = {
+  "access_token": "your_access_token"
+};
+~~~~
+
+**Note:** Without `refresh_token` and client credentials, you'll need to manually update the access token when it expires.
 
 Use the established connection to query your database:
 
