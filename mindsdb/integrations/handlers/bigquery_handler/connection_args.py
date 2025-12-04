@@ -22,6 +22,18 @@ connection_args = OrderedDict(
         'description': 'Content of service account JSON file',
         'secret': True
     },
+    include_tables={
+        'type': ARG_TYPE.STR,
+        'description': 'Comma-separated list of table names to include. Only these tables will be accessible.',
+        'required': False,
+        'label': 'Include Tables'
+    },
+    exclude_tables={
+        'type': ARG_TYPE.STR,
+        'description': 'Comma-separated list of table names to exclude. Applied after include_tables.',
+        'required': False,
+        'label': 'Exclude Tables'
+    },
 )
 
 connection_args_example = OrderedDict(

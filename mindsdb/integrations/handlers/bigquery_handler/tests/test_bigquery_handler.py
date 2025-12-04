@@ -217,5 +217,189 @@ class TestBigQueryHandlerQuery:
         ), f"expected to have {want_rows} rows in response but got: {got_rows}"
 
 
+@pytest.mark.usefixtures("bigquery_handler")
+class TestBigQueryHandlerFiltering:
+    """Tests for table filtering functionality"""
+
+    def test_no_filtering_backward_compatibility(self, bigquery_handler):
+        """Test that handler works without any filtering (backward compatibility)"""
+        res = bigquery_handler.get_tables()
+        assert res.type == RESPONSE_TYPE.TABLE
+        tables = res.data_frame['table_name'].tolist()
+        # Should return all tables including TEST and TEST_MDB
+        assert "TEST" in tables
+        assert len(tables) > 0
+
+    def test_include_tables_valid(self):
+        """Test include_tables with valid table names"""
+        handler_kwargs = HANDLER_KWARGS.copy()
+        handler_kwargs["connection_data"] = handler_kwargs["connection_data"].copy()
+        handler_kwargs["connection_data"]["include_tables"] = "TEST"
+        handler = BigQueryHandler("test_filtering_include", **handler_kwargs)
+
+        res = handler.get_tables()
+        assert res.type == RESPONSE_TYPE.TABLE
+        tables = res.data_frame['table_name'].tolist()
+        assert "TEST" in tables
+        assert len(tables) == 1
+        handler.disconnect()
+
+    def test_include_tables_multiple(self):
+        """Test include_tables with multiple table names"""
+        handler_kwargs = HANDLER_KWARGS.copy()
+        handler_kwargs["connection_data"] = handler_kwargs["connection_data"].copy()
+        handler_kwargs["connection_data"]["include_tables"] = "TEST,TEST_MDB"
+        handler = BigQueryHandler("test_filtering_include_multi", **handler_kwargs)
+
+        res = handler.get_tables()
+        assert res.type == RESPONSE_TYPE.TABLE
+        tables = res.data_frame['table_name'].tolist()
+        assert "TEST" in tables
+        assert "TEST_MDB" in tables
+        assert len(tables) == 2
+        handler.disconnect()
+
+    def test_include_tables_with_whitespace(self):
+        """Test include_tables with whitespace around table names"""
+        handler_kwargs = HANDLER_KWARGS.copy()
+        handler_kwargs["connection_data"] = handler_kwargs["connection_data"].copy()
+        handler_kwargs["connection_data"]["include_tables"] = " TEST , TEST_MDB "
+        handler = BigQueryHandler("test_filtering_whitespace", **handler_kwargs)
+
+        res = handler.get_tables()
+        assert res.type == RESPONSE_TYPE.TABLE
+        tables = res.data_frame['table_name'].tolist()
+        assert "TEST" in tables
+        assert "TEST_MDB" in tables
+        handler.disconnect()
+
+    def test_include_tables_invalid(self):
+        """Test include_tables with non-existent table raises ValueError"""
+        handler_kwargs = HANDLER_KWARGS.copy()
+        handler_kwargs["connection_data"] = handler_kwargs["connection_data"].copy()
+        handler_kwargs["connection_data"]["include_tables"] = "NONEXISTENT_TABLE"
+        handler = BigQueryHandler("test_filtering_invalid", **handler_kwargs)
+
+        # Should raise ValueError when trying to get tables
+        with pytest.raises(ValueError) as exc_info:
+            handler.get_tables()
+        assert "do not exist in dataset" in str(exc_info.value)
+        assert "NONEXISTENT_TABLE" in str(exc_info.value)
+        handler.disconnect()
+
+    def test_exclude_tables(self):
+        """Test exclude_tables filtering"""
+        handler_kwargs = HANDLER_KWARGS.copy()
+        handler_kwargs["connection_data"] = handler_kwargs["connection_data"].copy()
+        handler_kwargs["connection_data"]["exclude_tables"] = "TEST"
+        handler = BigQueryHandler("test_filtering_exclude", **handler_kwargs)
+
+        res = handler.get_tables()
+        assert res.type == RESPONSE_TYPE.TABLE
+        tables = res.data_frame['table_name'].tolist()
+        assert "TEST" not in tables
+        # Should still have other tables
+        assert len(tables) >= 0
+        handler.disconnect()
+
+    def test_include_and_exclude_tables(self):
+        """Test both include_tables and exclude_tables together"""
+        handler_kwargs = HANDLER_KWARGS.copy()
+        handler_kwargs["connection_data"] = handler_kwargs["connection_data"].copy()
+        handler_kwargs["connection_data"]["include_tables"] = "TEST,TEST_MDB"
+        handler_kwargs["connection_data"]["exclude_tables"] = "TEST"
+        handler = BigQueryHandler("test_filtering_both", **handler_kwargs)
+
+        res = handler.get_tables()
+        assert res.type == RESPONSE_TYPE.TABLE
+        tables = res.data_frame['table_name'].tolist()
+        assert "TEST" not in tables
+        assert "TEST_MDB" in tables
+        assert len(tables) == 1
+        handler.disconnect()
+
+    def test_meta_get_tables_respects_filtering(self):
+        """Test that meta_get_tables respects connection-time filters"""
+        handler_kwargs = HANDLER_KWARGS.copy()
+        handler_kwargs["connection_data"] = handler_kwargs["connection_data"].copy()
+        handler_kwargs["connection_data"]["include_tables"] = "TEST"
+        handler = BigQueryHandler("test_meta_filtering", **handler_kwargs)
+
+        res = handler.meta_get_tables()
+        assert res.type == RESPONSE_TYPE.TABLE
+        tables = res.data_frame['table_name'].tolist()
+        assert tables == ["TEST"]
+        handler.disconnect()
+
+    def test_meta_get_tables_intersection(self):
+        """Test query-time and connection-time filter intersection"""
+        handler_kwargs = HANDLER_KWARGS.copy()
+        handler_kwargs["connection_data"] = handler_kwargs["connection_data"].copy()
+        handler_kwargs["connection_data"]["include_tables"] = "TEST,TEST_MDB"
+        handler = BigQueryHandler("test_intersection", **handler_kwargs)
+
+        # Query-time filter should intersect with connection-time filter
+        res = handler.meta_get_tables(table_names=["TEST"])
+        assert res.type == RESPONSE_TYPE.TABLE
+        tables = res.data_frame['table_name'].tolist()
+        assert tables == ["TEST"]
+        handler.disconnect()
+
+    def test_meta_get_tables_intersection_no_match(self):
+        """Test intersection with no matching tables returns empty"""
+        handler_kwargs = HANDLER_KWARGS.copy()
+        handler_kwargs["connection_data"] = handler_kwargs["connection_data"].copy()
+        handler_kwargs["connection_data"]["include_tables"] = "TEST"
+        handler = BigQueryHandler("test_intersection_empty", **handler_kwargs)
+
+        # Query-time filter that doesn't match connection-time filter
+        res = handler.meta_get_tables(table_names=["TEST_MDB"])
+        assert res.type == RESPONSE_TYPE.TABLE
+        assert len(res.data_frame) == 0
+        handler.disconnect()
+
+    def test_meta_get_columns_respects_filtering(self):
+        """Test that meta_get_columns respects connection-time filters"""
+        handler_kwargs = HANDLER_KWARGS.copy()
+        handler_kwargs["connection_data"] = handler_kwargs["connection_data"].copy()
+        handler_kwargs["connection_data"]["include_tables"] = "TEST"
+        handler = BigQueryHandler("test_columns_filtering", **handler_kwargs)
+
+        res = handler.meta_get_columns()
+        assert res.type == RESPONSE_TYPE.TABLE
+        tables_in_columns = res.data_frame['table_name'].unique().tolist()
+        # Should only have columns from TEST table
+        assert tables_in_columns == ["TEST"]
+        handler.disconnect()
+
+    def test_cache_invalidation_on_disconnect(self):
+        """Test that the filtered table cache is cleared on disconnect"""
+        handler_kwargs = HANDLER_KWARGS.copy()
+        handler_kwargs["connection_data"] = handler_kwargs["connection_data"].copy()
+        handler_kwargs["connection_data"]["include_tables"] = "TEST"
+        handler = BigQueryHandler("test_cache", **handler_kwargs)
+
+        # First call should populate cache
+        res1 = handler.get_tables()
+        assert handler._filtered_tables is not None
+
+        # Disconnect should clear cache
+        handler.disconnect()
+        assert handler._filtered_tables is None
+
+    def test_all_tables_excluded_returns_empty(self):
+        """Test that excluding all included tables returns empty result"""
+        handler_kwargs = HANDLER_KWARGS.copy()
+        handler_kwargs["connection_data"] = handler_kwargs["connection_data"].copy()
+        handler_kwargs["connection_data"]["include_tables"] = "TEST"
+        handler_kwargs["connection_data"]["exclude_tables"] = "TEST"
+        handler = BigQueryHandler("test_all_excluded", **handler_kwargs)
+
+        res = handler.get_tables()
+        assert res.type == RESPONSE_TYPE.TABLE
+        assert len(res.data_frame) == 0
+        handler.disconnect()
+
+
 if __name__ == "__main__":
     pytest.main([__file__])
