@@ -16,6 +16,7 @@ from google.analytics.data_v1beta.types import (
     RunRealtimeReportRequest,
     GetMetadataRequest,
     FilterExpression,
+    FilterExpressionList,
     Filter,
     OrderBy,
 )
@@ -324,7 +325,7 @@ class ReportsTable(APITable):
 
         # Multiple filters - use AND logic
         return FilterExpression(
-            and_group=FilterExpression.FilterExpressionList(expressions=filters)
+            and_group=FilterExpressionList(expressions=filters)
         )
 
     def _build_metric_filter(self, metric_filters: dict) -> FilterExpression:
@@ -363,7 +364,7 @@ class ReportsTable(APITable):
             return filters[0]
 
         return FilterExpression(
-            and_group=FilterExpression.FilterExpressionList(expressions=filters)
+            and_group=FilterExpressionList(expressions=filters)
         )
 
     def _build_order_by(self, order_by_clause) -> List[OrderBy]:
@@ -707,7 +708,7 @@ class RealtimeReportsTable(APITable):
             return filters[0]
 
         return FilterExpression(
-            and_group=FilterExpression.FilterExpressionList(expressions=filters)
+            and_group=FilterExpressionList(expressions=filters)
         )
 
     def _build_metric_filter(self, metric_filters: dict) -> FilterExpression:
@@ -745,7 +746,7 @@ class RealtimeReportsTable(APITable):
             return filters[0]
 
         return FilterExpression(
-            and_group=FilterExpression.FilterExpressionList(expressions=filters)
+            and_group=FilterExpressionList(expressions=filters)
         )
 
     def _response_to_dataframe(self, response) -> pd.DataFrame:
