@@ -206,9 +206,11 @@ def filter_dataframe(df: pd.DataFrame, conditions: list):
             item = ast.BetweenOperation(args=[ast.Identifier(arg1), ast.Constant(arg2[0]), ast.Constant(arg2[1])])
         else:
             if isinstance(arg2, (tuple, list)):
-                arg2 = ast.Tuple(arg2)
-
-            item = ast.BinaryOperation(op=op, args=[ast.Identifier(arg1), ast.Constant(arg2)])
+                # For IN/NOT IN clauses, create a Tuple with Constant items
+                arg2_ast = ast.Tuple(items=[ast.Constant(value=v) for v in arg2])
+            else:
+                arg2_ast = ast.Constant(arg2)
+            item = ast.BinaryOperation(op=op, args=[ast.Identifier(arg1), arg2_ast])
         if where_query is None:
             where_query = item
         else:
