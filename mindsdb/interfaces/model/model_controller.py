@@ -266,9 +266,10 @@ class ModelController():
             problem_definition['using'] = statement.using
 
         if statement.order_by is not None:
+            order_field = getattr(statement, 'order_by')[0].field
             problem_definition['timeseries_settings'] = {
                 'is_timeseries': True,
-                'order_by': getattr(statement, 'order_by')[0].field.parts[-1]
+                'order_by': order_field.parts[-1] if hasattr(order_field, 'parts') else str(order_field)
             }
             for attr in ['horizon', 'window']:
                 if getattr(statement, attr) is not None:

@@ -178,7 +178,8 @@ class APIResource(APITable):
         if query.order_by and len(query.order_by) > 0:
             sort = []
             for an_order in query.order_by:
-                sort.append(SortColumn(an_order.field.parts[-1], an_order.direction.upper() != "DESC"))
+                field_name = an_order.field.parts[-1] if hasattr(an_order.field, 'parts') else str(an_order.field)
+                sort.append(SortColumn(field_name, an_order.direction.upper() != "DESC"))
 
         targets = []
         for col in query.targets:
