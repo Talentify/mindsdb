@@ -278,8 +278,11 @@ class Project:
         # Move ORDER BY, LIMIT, and OFFSET into view query to avoid redundant post-processing
         # This optimization allows handlers to receive these clauses directly
         if query.order_by and not view_query.order_by:
-            view_query.order_by = deepcopy(query.order_by)
-            query.order_by = None
+            # Don't push ORDER BY if the query has aggregates/GROUP BY
+            # because ORDER BY might reference aliases created by aggregation
+            if not Project._has_aggregates_or_groupby(query):
+                view_query.order_by = deepcopy(query.order_by)
+                query.order_by = None
 
         if query.limit is not None:
             if view_query.limit is None:

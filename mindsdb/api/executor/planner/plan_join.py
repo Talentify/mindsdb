@@ -411,8 +411,9 @@ class PlanJoinTablesQuery:
                         order_by = False
                         break
                     col = copy.deepcopy(col)
-                    col.field.parts = [col.field.parts[-1]]
-                    col.field.is_quoted = [col.field.is_quoted[-1]]
+                    if hasattr(col.field, 'parts'):
+                        col.field.parts = [col.field.parts[-1]]
+                        col.field.is_quoted = [col.field.is_quoted[-1]]
                     order_by.append(col)
 
             if order_by is not False:

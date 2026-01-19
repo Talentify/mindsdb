@@ -108,7 +108,7 @@ class MongodbRender:
         sort = {}
         if node.order_by is not None:
             for col in node.order_by:
-                name = col.field.parts[-1]
+                name = col.field.parts[-1] if hasattr(col.field, 'parts') else str(col.field)
                 direction = 1 if col.direction.upper() == "ASC" else -1
                 sort[name] = direction
 

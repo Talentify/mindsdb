@@ -228,7 +228,7 @@ def sort_dataframe(df, order_by: list):
         if not isinstance(order, ast.OrderBy):
             continue
 
-        col = order.field.parts[-1]
+        col = order.field.parts[-1] if hasattr(order.field, 'parts') else str(order.field)
         if col not in df.columns:
             continue
 
