@@ -13,6 +13,18 @@ from typing import Any, List, Optional, Tuple
 from openai import AsyncOpenAI, AsyncAzureOpenAI
 from pydantic import BaseModel
 
+try:
+    from google import genai
+    GOOGLE_GENAI_AVAILABLE = True
+except ImportError:
+    # Fallback to old deprecated package if new one not available
+    try:
+        import google.generativeai as genai
+        GOOGLE_GENAI_AVAILABLE = False
+    except ImportError:
+        genai = None
+        GOOGLE_GENAI_AVAILABLE = None
+
 from mindsdb.integrations.utilities.rag.settings import (
     DEFAULT_RERANKING_MODEL,
     DEFAULT_LLM_ENDPOINT,
@@ -85,6 +97,33 @@ class BaseLLMReranker(BaseModel, ABC):
                     api_key=openai_api_key, base_url=base_url, timeout=self.request_timeout, max_retries=2
                 )
 
+            elif self.provider in ("google", "google_genai"):
+                # Use Google Gen AI directly instead of routing through litellm
+                if genai is None:
+                    raise ValueError(
+                        "Google GenAI package not installed. Install with: pip install google-genai"
+                    )
+
+                google_api_key = self.api_key or os.getenv("GOOGLE_API_KEY") or os.getenv("GOOGLE_GENAI_API_KEY")
+                if not google_api_key:
+                    raise ValueError(
+                        "Google API key not found. Set GOOGLE_API_KEY or GOOGLE_GENAI_API_KEY environment variable, "
+                        "or provide api_key parameter in reranking_model configuration"
+                    )
+
+                if GOOGLE_GENAI_AVAILABLE:
+                    # Use new google-genai package (recommended)
+                    self.client = genai.Client(api_key=google_api_key)
+                    log.info(f"Initialized Google Gen AI reranker with model: {self.model} (using new google-genai SDK)")
+                else:
+                    # Fallback to old deprecated google-generativeai package
+                    genai.configure(api_key=google_api_key)
+                    self.client = genai.GenerativeModel(self.model)
+                    log.warning(f"Using deprecated google-generativeai package. Consider upgrading to google-genai")
+
+                # Google Gen AI doesn't support logprobs like OpenAI, so use no-logprobs method
+                self.method = "no-logprobs"
+
             else:
                 # try to use litellm
                 from mindsdb.api.executor.controllers.session_controller import SessionController
@@ -104,6 +143,58 @@ class BaseLLMReranker(BaseModel, ABC):
                 model=self.model,
                 messages=messages,
             )
+        elif self.provider in ("google", "google_genai"):
+            # Convert OpenAI message format to Google Gen AI prompt format
+            prompt_parts = []
+            for msg in messages:
+                role = msg.get("role", "user")
+                content = msg.get("content", "")
+                if role == "system":
+                    prompt_parts.append(f"Instructions: {content}")
+                elif role == "user":
+                    prompt_parts.append(f"User: {content}")
+                elif role == "assistant":
+                    prompt_parts.append(f"Assistant: {content}")
+                else:
+                    prompt_parts.append(content)
+
+            prompt = "\n\n".join(prompt_parts)
+
+            if GOOGLE_GENAI_AVAILABLE:
+                # Use new google-genai package with native async support
+                response = await self.client.aio.models.generate_content(
+                    model=self.model,
+                    contents=prompt,
+                )
+                # Return in OpenAI-compatible format
+                class CompletionChoice:
+                    def __init__(self, text):
+                        self.message = type('Message', (), {'content': text})()
+
+                class CompletionResponse:
+                    def __init__(self, text):
+                        self.choices = [CompletionChoice(text)]
+
+                return CompletionResponse(response.text)
+            else:
+                # Use old google-generativeai package (no native async, use executor)
+                loop = asyncio.get_event_loop()
+                response = await loop.run_in_executor(
+                    None,
+                    self.client.generate_content,
+                    prompt
+                )
+
+                # Return in OpenAI-compatible format
+                class CompletionChoice:
+                    def __init__(self, text):
+                        self.message = type('Message', (), {'content': text})()
+
+                class CompletionResponse:
+                    def __init__(self, text):
+                        self.choices = [CompletionChoice(text)]
+
+                return CompletionResponse(response.text)
         else:
             kwargs = self.model_extra.copy()
 
