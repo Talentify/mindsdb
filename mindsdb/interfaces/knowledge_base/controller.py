@@ -456,18 +456,21 @@ class KnowledgeBaseTable:
         reranking_model_params = get_model_params(self._kb.params.get("reranking_model"), "default_reranking_model")
         if reranking_model_params and query_text and len(df) > 0 and not disable_reranking:
             # Use reranker for relevance score
-
             logger.info(f"Using knowledge reranking model from params: {reranking_model_params}")
+
             # Apply custom filtering threshold if provided
             if relevance_threshold is not None:
                 reranking_model_params["filtering_threshold"] = relevance_threshold
                 logger.info(f"Using custom filtering threshold: {relevance_threshold}")
 
+            # Create a new reranker instance for each query
+            # (caching is not possible due to event loop binding issues with Google Gen AI SDK)
             reranker = get_reranking_model_from_params(reranking_model_params)
+
             # Get documents to rerank
             documents = df["chunk_content"].tolist()
-            # Use the get_scores method with disable_events=True
             scores = reranker.get_scores(query_text, documents)
+
             # Add scores as the relevance column
             df[relevance_column] = scores
 
