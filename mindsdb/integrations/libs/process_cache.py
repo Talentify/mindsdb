@@ -1,5 +1,6 @@
 import time
 import threading
+import atexit
 from typing import Optional, Callable
 from concurrent.futures import ProcessPoolExecutor, Future
 
@@ -82,7 +83,7 @@ class WarmProcess:
     def __del__(self):
         self.shutdown()
 
-    def shutdown(self, wait: bool = False) -> None:
+    def shutdown(self, wait: bool = True) -> None:
         """Like ProcessPoolExecutor.shutdown
 
         Args:
@@ -372,7 +373,7 @@ class ProcessCache:
     def _clean(self) -> None:
         """ worker that stop unused processes
         """
-        while self._stop_event.wait(timeout=10) is False:
+        while self._stop_event.wait(timeout=2) is False:
             with self._lock:
                 for handler_name in self.cache.keys():
                     processes = self.cache[handler_name]['processes']
@@ -391,7 +392,7 @@ class ProcessCache:
                         ):
                             processes.pop(i)
                             # del process
-                            process.shutdown()
+                            process.shutdown(wait=True)  # Ensure proper cleanup with wait=True
                             break
 
                     while expected_count > len(processes):
@@ -428,3 +429,6 @@ class ProcessCache:
 
 
 process_cache = ProcessCache()
+
+# Register cleanup handler to ensure proper shutdown on application exit
+atexit.register(process_cache.shutdown, wait=True)
