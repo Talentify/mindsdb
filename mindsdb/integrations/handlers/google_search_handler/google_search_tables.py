@@ -27,6 +27,7 @@ class SearchAnalyticsTable(APITable):
         conditions = extract_comparison_conditions(query.where)
         # Get the start and end times from the conditions.
         params = {}
+        # Note: siteUrl is now optional in WHERE clause (taken from connection if not specified)
         accepted_params = ['siteUrl', 'dimensions', 'type', 'rowLimit', 'aggregationType']
         for op, arg1, arg2 in conditions:
             if arg1 == 'startDate' or arg1 == 'endDate':
@@ -118,6 +119,7 @@ class SiteMapsTable(APITable):
         conditions = extract_comparison_conditions(query.where)
         # Get the start and end times from the conditions.
         params = {}
+        # Note: siteUrl is now optional in WHERE clause (taken from connection if not specified)
         accepted_params = ['siteUrl', 'sitemapIndex']
         for op, arg1, arg2 in conditions:
             if op != '=':
@@ -167,6 +169,7 @@ class SiteMapsTable(APITable):
         values = query.values[0]
         params = {}
         # Get the event data from the values.
+        # Note: siteUrl is optional (taken from connection if not specified)
         for col, val in zip(query.columns, values):
             if col == 'siteUrl' or col == 'feedpath':
                 params[col] = val
@@ -191,6 +194,7 @@ class SiteMapsTable(APITable):
         conditions = extract_comparison_conditions(query.where)
         # Get the start and end times from the conditions.
         params = {}
+        # Note: siteUrl is optional in WHERE clause (taken from connection if not specified)
         for op, arg1, arg2 in conditions:
             if op != '=':
                 raise NotImplementedError
@@ -214,4 +218,149 @@ class SiteMapsTable(APITable):
             'warnings',
             'errors',
             'contents'
+        ]
+
+
+class UrlInspectionTable(APITable):
+    """
+    Table class for the Google Search Console URL Inspection API.
+    """
+
+    def select(self, query: ast.Select) -> DataFrame:
+        """
+        Inspects URLs to check indexing status, mobile usability, AMP, rich results, etc.
+
+        Args:
+            query (ast.Select): SQL query to parse.
+
+        Returns:
+            Response: Response object containing the results.
+        """
+
+        # Parse the query to get the conditions.
+        conditions = extract_comparison_conditions(query.where)
+        params = {}
+        # Note: siteUrl is optional in WHERE clause (taken from connection if not specified)
+        accepted_params = ['siteUrl', 'inspectionUrl', 'languageCode']
+        for op, arg1, arg2 in conditions:
+            if op != '=':
+                raise NotImplementedError('Only = operator is supported')
+            if arg1 in accepted_params:
+                params[arg1] = arg2
+            else:
+                raise NotImplementedError(f'Unsupported parameter: {arg1}')
+
+        # inspectionUrl is required
+        if 'inspectionUrl' not in params:
+            raise ValueError('inspectionUrl is required in WHERE clause (e.g., WHERE inspectionUrl = "https://example.com/page")')
+
+        # Get the URL inspection data from the Google Search Console API.
+        inspection_data = self.handler.call_application_api(
+            method_name='inspect_url',
+            params=params
+        )
+
+        selected_columns = []
+        for target in query.targets:
+            if isinstance(target, ast.Star):
+                selected_columns = self.get_columns()
+                break
+            elif isinstance(target, ast.Identifier):
+                selected_columns.append(target.parts[-1])
+            else:
+                raise ValueError(f"Unknown query target {type(target)}")
+
+        if len(inspection_data) == 0:
+            inspection_data = pd.DataFrame([], columns=selected_columns)
+        else:
+            inspection_data.columns = self.get_columns()
+            for col in set(inspection_data.columns).difference(set(selected_columns)):
+                inspection_data = inspection_data.drop(col, axis=1)
+        return inspection_data
+
+    def get_columns(self) -> list:
+        """Gets all columns to be returned in pandas DataFrame responses"""
+        return [
+            'inspectionUrl',
+            'indexStatusVerdict',
+            'coverageState',
+            'robotsTxtState',
+            'indexingState',
+            'lastCrawlTime',
+            'pageFetchState',
+            'googleCanonical',
+            'userCanonical',
+            'crawledAs',
+            'mobileUsabilityVerdict',
+            'mobileUsabilityIssues',
+            'ampInspectionResult',
+            'richResultsResult'
+        ]
+
+
+class MobileFriendlyTestTable(APITable):
+    """
+    Table class for the Google Search Console Mobile-Friendly Test API.
+    """
+
+    def select(self, query: ast.Select) -> DataFrame:
+        """
+        Tests URLs for mobile-friendliness.
+
+        Args:
+            query (ast.Select): SQL query to parse.
+
+        Returns:
+            Response: Response object containing the results.
+        """
+
+        # Parse the query to get the conditions.
+        conditions = extract_comparison_conditions(query.where)
+        params = {}
+        accepted_params = ['url', 'requestScreenshot']
+        for op, arg1, arg2 in conditions:
+            if op != '=':
+                raise NotImplementedError('Only = operator is supported')
+            if arg1 in accepted_params:
+                params[arg1] = arg2
+            else:
+                raise NotImplementedError(f'Unsupported parameter: {arg1}')
+
+        # url is required
+        if 'url' not in params:
+            raise ValueError('url is required in WHERE clause (e.g., WHERE url = "https://example.com/page")')
+
+        # Get the mobile-friendly test data from the Google Search Console API.
+        test_data = self.handler.call_application_api(
+            method_name='mobile_friendly_test',
+            params=params
+        )
+
+        selected_columns = []
+        for target in query.targets:
+            if isinstance(target, ast.Star):
+                selected_columns = self.get_columns()
+                break
+            elif isinstance(target, ast.Identifier):
+                selected_columns.append(target.parts[-1])
+            else:
+                raise ValueError(f"Unknown query target {type(target)}")
+
+        if len(test_data) == 0:
+            test_data = pd.DataFrame([], columns=selected_columns)
+        else:
+            test_data.columns = self.get_columns()
+            for col in set(test_data.columns).difference(set(selected_columns)):
+                test_data = test_data.drop(col, axis=1)
+        return test_data
+
+    def get_columns(self) -> list:
+        """Gets all columns to be returned in pandas DataFrame responses"""
+        return [
+            'url',
+            'mobileFriendliness',
+            'mobileFriendlyIssues',
+            'resourceIssues',
+            'testStatus',
+            'screenshot'
         ]

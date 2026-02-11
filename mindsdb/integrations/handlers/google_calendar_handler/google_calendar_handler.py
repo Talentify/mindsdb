@@ -1,5 +1,7 @@
 import pandas as pd
 from googleapiclient.discovery import build
+from google.oauth2.credentials import Credentials as OAuthCredentials
+from google.auth.transport.requests import Request
 
 from mindsdb.api.executor.data_types.response_type import RESPONSE_TYPE
 from mindsdb.integrations.libs.api_handler import APIHandler, FuncParser
@@ -53,7 +55,7 @@ class GoogleCalendarHandler(APIHandler):
             self.credentials_file = self.connection_data.pop("credentials")
         if not self.credentials_file and not self.credentials_url:
             # try to get from config
-            gcalendar_config = Config().get("handlers", {}).get("youtube", {})
+            gcalendar_config = Config().get("handlers", {}).get("google_calendar", {})
             secret_file = gcalendar_config.get("credentials_file")
             secret_url = gcalendar_config.get("credentials_url")
             if secret_file:
@@ -62,12 +64,14 @@ class GoogleCalendarHandler(APIHandler):
                 self.credentials_url = secret_url
 
         self.scopes = self.connection_data.get("scopes", DEFAULT_SCOPES)
+        if isinstance(self.scopes, str):
+            self.scopes = [scope.strip() for scope in self.scopes.split(',') if scope.strip()]
 
         events = GoogleCalendarEventsTable(self)
         self.events = events
         self._register_table("events", events)
 
-    def connect(self):
+    def connect(self, **kwargs):
         """
         Set up any connections required by the handler
         Should return output of check_connection() method after attempting
@@ -75,7 +79,44 @@ class GoogleCalendarHandler(APIHandler):
         Returns:
             HandlerStatusResponse
         """
-        if self.is_connected is True:
+        if self.is_connected and self.service is not None:
+            return self.service
+
+        params = dict(self.connection_data) if self.connection_data else {}
+
+        # Merge optional parameters passed at call time without mutating the cached args
+        override_params = kwargs.get('parameters') or {}
+        params.update(override_params)
+
+        # Allow nested "parameters" key (e.g. when provided through CREATE DATABASE ... PARAMETERS = {...})
+        nested_params = params.get('parameters')
+        if isinstance(nested_params, dict):
+            params.update(nested_params)
+
+        if 'refresh_token' in params:
+            client_id = params.get('client_id')
+            client_secret = params.get('client_secret')
+            refresh_token = params['refresh_token']
+            token_uri = params.get('token_uri', 'https://oauth2.googleapis.com/token')
+            scopes = params.get('scopes') or self.scopes or DEFAULT_SCOPES
+            if isinstance(scopes, str):
+                scopes = [scope.strip() for scope in scopes.split(',') if scope.strip()]
+
+            if not client_id or not client_secret:
+                raise Exception('google_calendar_handler: client_id and client_secret are required when refresh_token is provided')
+
+            creds = OAuthCredentials(
+                token=None,
+                refresh_token=refresh_token,
+                token_uri=token_uri,
+                client_id=client_id,
+                client_secret=client_secret,
+                scopes=scopes
+            )
+
+            creds.refresh(Request())
+            self.service = build('calendar', 'v3', credentials=creds)
+            self.is_connected = True
             return self.service
 
         google_oauth2_manager = GoogleUserOAuth2Manager(
@@ -88,6 +129,8 @@ class GoogleCalendarHandler(APIHandler):
         creds = google_oauth2_manager.get_oauth2_credentials()
 
         self.service = build("calendar", "v3", credentials=creds)
+
+        self.is_connected = True
         return self.service
 
     def check_connection(self) -> StatusResponse:
