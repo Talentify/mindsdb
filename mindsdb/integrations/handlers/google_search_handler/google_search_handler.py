@@ -17,8 +17,7 @@ from mindsdb.integrations.utilities.handlers.auth_utilities.google import Google
 from mindsdb.integrations.utilities.handlers.auth_utilities.exceptions import AuthException
 
 DEFAULT_SCOPES = [
-    "https://www.googleapis.com/auth/webmasters.readonly",
-    "https://www.googleapis.com/auth/webmasters",
+    "https://www.googleapis.com/auth/webmasters.readonly"
 ]
 
 logger = log.getLogger(__name__)
