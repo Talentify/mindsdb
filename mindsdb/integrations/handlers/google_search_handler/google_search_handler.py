@@ -5,7 +5,7 @@ from google.auth.transport.requests import Request
 from google.oauth2.credentials import Credentials as OAuthCredentials
 from googleapiclient.discovery import build
 from mindsdb.api.executor.data_types.response_type import RESPONSE_TYPE
-from .google_search_tables import SearchAnalyticsTable, SiteMapsTable, UrlInspectionTable, MobileFriendlyTestTable
+from .google_search_tables import SearchAnalyticsTable, SiteMapsTable, UrlInspectionTable
 from mindsdb.integrations.libs.api_handler import APIHandler, FuncParser
 from mindsdb.integrations.libs.response import (
     HandlerStatusResponse as StatusResponse,
@@ -39,6 +39,7 @@ class GoogleSearchConsoleHandler(APIHandler):
         """
         super().__init__(name)
         self.service = None
+        self.search_console_service = None  # For URL Inspection API (searchconsole v1)
         self.connection_data = kwargs.get("connection_data", {})
         self.is_connected = False
 
@@ -76,9 +77,6 @@ class GoogleSearchConsoleHandler(APIHandler):
         url_inspection = UrlInspectionTable(self)
         self.url_inspection = url_inspection
         self._register_table("UrlInspection", url_inspection)
-        mobile_friendly_test = MobileFriendlyTestTable(self)
-        self.mobile_friendly_test = mobile_friendly_test
-        self._register_table("MobileFriendlyTest", mobile_friendly_test)
 
     def connect(self, **kwargs):
         """
@@ -88,7 +86,7 @@ class GoogleSearchConsoleHandler(APIHandler):
         Returns:
             HandlerStatusResponse
         """
-        if self.is_connected and self.service is not None:
+        if self.is_connected and self.service is not None and self.search_console_service is not None:
             return self.service
 
         params = dict(self.connection_data) if self.connection_data else {}
@@ -125,6 +123,7 @@ class GoogleSearchConsoleHandler(APIHandler):
 
             creds.refresh(Request())
             self.service = build('webmasters', 'v3', credentials=creds)
+            self.search_console_service = build('searchconsole', 'v1', credentials=creds)
             self.is_connected = True
             return self.service
 
@@ -138,6 +137,7 @@ class GoogleSearchConsoleHandler(APIHandler):
         creds = google_oauth2_manager.get_oauth2_credentials()
 
         self.service = build('webmasters', 'v3', credentials=creds)
+        self.search_console_service = build('searchconsole', 'v1', credentials=creds)
 
         self.is_connected = True
         return self.service
@@ -192,12 +192,11 @@ class GoogleSearchConsoleHandler(APIHandler):
         """
         service = self.connect()
         accepted_params = ["start_date", "end_date", "dimensions", "row_limit", "aggregation_type", "data_state", "dimensionFilterGroups"]
-        logger.info(f"Received parameters for get_traffic_data: {params}")
         search_analytics_query_request = {
             key: value for key, value in params.items() if key in accepted_params and value is not None
         }
         # Use site_url from connection if not provided in params
-        site_url = params.get("siteUrl", self.site_url)
+        site_url = params.get("site_url", self.site_url)
         response = (
             service.searchanalytics().query(siteUrl=site_url, body=search_analytics_query_request).execute()
         )
@@ -229,11 +228,13 @@ class GoogleSearchConsoleHandler(APIHandler):
         """
         service = self.connect()
         # Use site_url from connection if not provided in params
-        site_url = params.get("siteUrl", self.site_url)
-        if params.get("sitemapIndex"):
-            response = service.sitemaps().list(siteUrl=site_url, sitemapIndex=params["sitemapIndex"]).execute()
+        site_url = params.get("site_url", self.site_url)
+        if params.get("sitemap_index"):
+            response = service.sitemaps().list(siteUrl=site_url, sitemapIndex=params["sitemap_index"]).execute()
         else:
             response = service.sitemaps().list(siteUrl=site_url).execute()
+        if "sitemap" not in response:
+            return pd.DataFrame(columns=self.sitemaps.get_columns())
         df = pd.DataFrame(response["sitemap"], columns=self.sitemaps.get_columns())
 
         # Get as many sitemaps as indicated by the row_limit parameter
@@ -287,11 +288,17 @@ class GoogleSearchConsoleHandler(APIHandler):
         """
         import json
 
-        service = self.connect()
+        self.connect()  # Ensures both services are initialized
+        if not self.search_console_service:
+            raise Exception(
+                "Search Console v1 service not available. "
+                "URL Inspection requires the searchconsole v1 API."
+            )
+
         # Use site_url from connection if not provided in params
-        site_url = params.get("siteUrl", self.site_url)
-        inspection_url = params["inspectionUrl"]
-        language_code = params.get("languageCode", "en-US")
+        site_url = params.get("site_url", self.site_url)
+        inspection_url = params["inspection_url"]
+        language_code = params.get("language_code", "en-US")
 
         body = {
             "inspectionUrl": inspection_url,
@@ -299,8 +306,11 @@ class GoogleSearchConsoleHandler(APIHandler):
             "languageCode": language_code
         }
 
-        response = service.urlInspection().index().inspect(body=body).execute()
+        logger.info(f"Sending request to URL Inspection API with body: {body}")
 
+        response = self.search_console_service.urlInspection().index().inspect(body=body).execute()
+
+        logger.info(f"Received response from URL Inspection API: {response}")
         # Extract key data from the nested response structure
         inspection_result = response.get('inspectionResult', {})
         index_status = inspection_result.get('indexStatusResult', {})
@@ -325,42 +335,8 @@ class GoogleSearchConsoleHandler(APIHandler):
             'ampInspectionResult': json.dumps(amp_result),
             'richResultsResult': json.dumps(rich_results)
         }
-
+        
         df = pd.DataFrame([result], columns=self.url_inspection.get_columns())
-        return df
-
-    def mobile_friendly_test(self, params: dict = None) -> DataFrame:
-        """
-        Test a URL for mobile-friendliness using Google Search Console Mobile-Friendly Test API
-        Args:
-            params (dict): query parameters including url, requestScreenshot (optional)
-        Returns:
-            DataFrame
-        """
-        import json
-
-        service = self.connect()
-        url = params["url"]
-        request_screenshot = params.get("requestScreenshot", False)
-
-        body = {
-            "url": url,
-            "requestScreenshot": request_screenshot
-        }
-
-        response = service.urlTestingTools().mobileFriendlyTest().run(body=body).execute()
-
-        # Build flattened result
-        result = {
-            'url': url,
-            'mobileFriendliness': response.get('mobileFriendliness'),
-            'mobileFriendlyIssues': json.dumps(response.get('mobileFriendlyIssues', [])),
-            'resourceIssues': json.dumps(response.get('resourceIssues', [])),
-            'testStatus': json.dumps(response.get('testStatus', {})),
-            'screenshot': response.get('screenshot', {}).get('data') if request_screenshot else None
-        }
-
-        df = pd.DataFrame([result], columns=self.mobile_friendly_test.get_columns())
         return df
 
     def call_application_api(self, method_name: str = None, params: dict = None) -> DataFrame:
@@ -382,7 +358,5 @@ class GoogleSearchConsoleHandler(APIHandler):
             return self.delete_sitemap(params)
         elif method_name == "inspect_url":
             return self.inspect_url(params)
-        elif method_name == "mobile_friendly_test":
-            return self.mobile_friendly_test(params)
         else:
             raise NotImplementedError(f"Unknown method {method_name}")
