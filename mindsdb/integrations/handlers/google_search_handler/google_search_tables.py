@@ -34,7 +34,7 @@ class SearchAnalyticsTable(APITable):
         if 'end_date' not in [arg1 for _, arg1, _ in conditions]:
             raise ValueError('end_date is required in WHERE clause (e.g., WHERE end_date = "2023-01-01")')
 
-        accepted_params = ['site_url', 'type', 'row_limit']
+        accepted_params = ['site_url', 'type', 'row_limit', 'data_state']
         accepted_dimensions = ['date', "hour", 'query', 'page', 'country', 'device']
         for op, arg, val in conditions:
             if arg in ['start_date']:
@@ -54,19 +54,27 @@ class SearchAnalyticsTable(APITable):
                     val = [val]
                 if not isinstance(val, list):
                     raise ValueError("Dimensions must be provided as a list or a single string value.")
-
                 for v in val:
                     if v not in accepted_dimensions:
                         raise ValueError(f"Invalid dimension '{v}'. Accepted dimensions are: {accepted_dimensions}")
-
+                    if 'hour' in val and 'date' in val:
+                        raise ValueError("Cannot use 'hour' dimension with 'date' dimension.")
                 params['dimensions'] = val
-
+            elif arg in ['data_state']:
+                if op != '=':
+                    raise NotImplementedError(f"Operator '{op}' not supported for data_state. Use '='")
+                if val not in ['all', 'final', 'hourly_all']:
+                    raise ValueError("Invalid data_state value. Accepted values are: 'all', 'final', 'hourly_all'")
+                params['data_state'] = val
             elif arg in accepted_params:
                 if op != '=':
                     raise NotImplementedError
                 params[arg] = val
             else:
                 raise NotImplementedError
+            
+        if 'hour' in params.get('dimensions', []) and params.get('data_state') != 'hourly_all':
+            raise ValueError("When using 'hour' dimension, 'data_state' must be set to 'hourly_all'")
 
         # Get the order by from the query.
         if query.order_by is not None:

@@ -191,7 +191,7 @@ class GoogleSearchConsoleHandler(APIHandler):
             DataFrame
         """
         service = self.connect()
-        accepted_params = ["start_date", "end_date", "dimensions", "row_limit", "aggregation_type"]
+        accepted_params = ["start_date", "end_date", "dimensions", "row_limit", "aggregation_type", "data_state"]
         logger.info(f"Received parameters for get_traffic_data: {params}")
         search_analytics_query_request = {
             key: value for key, value in params.items() if key in accepted_params and value is not None
