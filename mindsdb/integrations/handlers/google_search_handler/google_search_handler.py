@@ -201,6 +201,8 @@ class GoogleSearchConsoleHandler(APIHandler):
         response = (
             service.searchanalytics().query(siteUrl=site_url, body=search_analytics_query_request).execute()
         )
+        if "rows" not in response:
+            return pd.DataFrame(columns=self.analytics.get_columns())
         df = pd.DataFrame(response["rows"], columns=self.analytics.get_columns())
         return df
 

@@ -34,9 +34,11 @@ class SearchAnalyticsTable(APITable):
         if 'end_date' not in [arg1 for _, arg1, _ in conditions]:
             raise ValueError('end_date is required in WHERE clause (e.g., WHERE end_date = "2023-01-01")')
 
-        accepted_params = ['site_url', 'type', 'row_limit', 'data_state']
+        accepted_params = ['site_url', 'type', 'data_state', 'start_row']
         accepted_dimensions = ['date', "hour", 'query', 'page', 'country', 'device']
         for op, arg, val in conditions:
+            # Validate the conditions and convert them into API parameters.
+            # Validate start_date and end_date conditions
             if arg in ['start_date']:
                 if op in ['=']:
                     params['start_date'] = val
@@ -47,25 +49,46 @@ class SearchAnalyticsTable(APITable):
                     params['end_date'] = val
                 else:
                     raise NotImplementedError(f"Operator '{op}' not supported for end_date. Use '=', '<=', or '<'")
+            # Validate dimensions condition
             elif arg in ['dimensions']:
+                # Dimensions can be one or a list
                 if op not in ['=', "in"]:
                     raise NotImplementedError(f"Operator '{op}' not supported for dimension. Use '=' or 'IN'")
                 if isinstance(val, str):
                     val = [val]
                 if not isinstance(val, list):
                     raise ValueError("Dimensions must be provided as a list or a single string value.")
+                # Validate that all dimensions are accepted and that hour and date are not used together
                 for v in val:
                     if v not in accepted_dimensions:
                         raise ValueError(f"Invalid dimension '{v}'. Accepted dimensions are: {accepted_dimensions}")
                     if 'hour' in val and 'date' in val:
                         raise ValueError("Cannot use 'hour' dimension with 'date' dimension.")
                 params['dimensions'] = val
+            # Validate data state condition
             elif arg in ['data_state']:
                 if op != '=':
                     raise NotImplementedError(f"Operator '{op}' not supported for data_state. Use '='")
+                # (all is to include fresh data that may not be fully processed, final is to include only 
+                # fully processed data, hourly_all is to include all hourly data regardless of processing state)
                 if val not in ['all', 'final', 'hourly_all']:
                     raise ValueError("Invalid data_state value. Accepted values are: 'all', 'final', 'hourly_all'")
                 params['data_state'] = val
+            # Validate type
+            elif arg in ['type']:
+                if op != '=':
+                    raise NotImplementedError(f"Operator '{op}' not supported for type. Use '='")
+                if val not in ['discover', 'googleNews', 'news', 'web', 'image', 'video']:
+                    raise ValueError("Invalid type value. Accepted values are: 'discover', 'googleNews', 'news', 'web', 'image', 'video'")
+                params['type'] = val
+            # Validate start_row
+            elif arg in ['start_row']:
+                if op != '=':
+                    raise NotImplementedError(f"Operator '{op}' not supported for start_row. Use '='")
+                if not isinstance(val, int) or val < 0:
+                    raise ValueError("start_row must be a non-negative integer.")
+                params['start_row'] = val
+            # Other accepted parameters
             elif arg in accepted_params:
                 if op != '=':
                     raise NotImplementedError
@@ -75,15 +98,6 @@ class SearchAnalyticsTable(APITable):
             
         if 'hour' in params.get('dimensions', []) and params.get('data_state') != 'hourly_all':
             raise ValueError("When using 'hour' dimension, 'data_state' must be set to 'hourly_all'")
-
-        # Get the order by from the query.
-        if query.order_by is not None:
-            if query.order_by[0].value == 'start_time':
-                params['orderBy'] = 'startTime'
-            elif query.order_by[0].value == 'updated':
-                params['orderBy'] = 'updated'
-            else:
-                raise NotImplementedError
 
         if query.limit is not None:
             params['row_limit'] = query.limit.value
