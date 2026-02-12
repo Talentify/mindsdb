@@ -1,3 +1,4 @@
+from datetime import datetime, timedelta
 import pandas as pd
 
 from pandas import DataFrame
@@ -197,6 +198,13 @@ class GoogleSearchConsoleHandler(APIHandler):
         }
         # Use site_url from connection if not provided in params
         site_url = params.get("site_url", self.site_url)
+
+        # Default start and end_dates, if provided, replace these defaults (last 30 days)
+        if search_analytics_query_request.get('start_date') is None:
+            search_analytics_query_request['start_date'] = (datetime.now() - timedelta(days=30)).strftime('%Y-%m-%d')  
+        if search_analytics_query_request.get('end_date') is None:
+            search_analytics_query_request['end_date'] = datetime.now().strftime('%Y-%m-%d')
+
         response = (
             service.searchanalytics().query(siteUrl=site_url, body=search_analytics_query_request).execute()
         )
@@ -300,17 +308,20 @@ class GoogleSearchConsoleHandler(APIHandler):
         inspection_url = params["inspection_url"]
         language_code = params.get("language_code", "en-US")
 
+        if not inspection_url:
+            if site_url.startswith("sc-domain"):
+                inspection_url = f"https://{site_url.split(':')[1]}"
+            else:
+                inspection_url = site_url
+
         body = {
             "inspectionUrl": inspection_url,
             "siteUrl": site_url,
             "languageCode": language_code
         }
 
-        logger.info(f"Sending request to URL Inspection API with body: {body}")
-
         response = self.search_console_service.urlInspection().index().inspect(body=body).execute()
 
-        logger.info(f"Received response from URL Inspection API: {response}")
         # Extract key data from the nested response structure
         inspection_result = response.get('inspectionResult', {})
         index_status = inspection_result.get('indexStatusResult', {})

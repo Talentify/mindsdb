@@ -29,13 +29,6 @@ class SearchAnalyticsTable(APITable):
         conditions = extract_comparison_conditions(query.where) if query.where else []
         # Get the start and end times from the conditions.
         params = {}
-
-        if 'start_date' not in [arg1 for _, arg1, _ in conditions]:
-            raise ValueError('start_date is required in WHERE clause (e.g., WHERE start_date = "2023-01-01")')
-
-        if 'end_date' not in [arg1 for _, arg1, _ in conditions]:
-            raise ValueError('end_date is required in WHERE clause (e.g., WHERE end_date = "2023-01-01")')
-
         accepted_params = ['site_url', 'type', 'data_state', 'start_row']
         accepted_dimensions = ['date', "hour", 'query', 'page', 'country', 'device', 'searchAppearance']
         dimension_filters = {}
@@ -410,6 +403,7 @@ class UrlInspectionTable(APITable):
         # Parse the query to get the conditions.
         conditions = extract_comparison_conditions(query.where)
         params = {}
+        params['inspection_url'] = None
         # Note: siteUrl is optional in WHERE clause (taken from connection if not specified)
         accepted_params = ['site_url', 'inspection_url', 'language_code']
         for op, arg1, arg2 in conditions:
