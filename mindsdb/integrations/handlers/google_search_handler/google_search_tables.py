@@ -13,6 +13,8 @@ class SearchAnalyticsTable(APITable):
     Table class for the Google Search Console Search Analytics table.
     """
 
+    FILTERABLE_DIMENSIONS = ['country', 'device', 'page', 'query', 'searchAppearance']
+
     def select(self, query: ast.Select) -> DataFrame:
         """
         Gets all traffic data from the Search Console.
@@ -35,7 +37,8 @@ class SearchAnalyticsTable(APITable):
             raise ValueError('end_date is required in WHERE clause (e.g., WHERE end_date = "2023-01-01")')
 
         accepted_params = ['site_url', 'type', 'data_state', 'start_row']
-        accepted_dimensions = ['date', "hour", 'query', 'page', 'country', 'device']
+        accepted_dimensions = ['date', "hour", 'query', 'page', 'country', 'device', 'searchAppearance']
+        dimension_filters = {}
         for op, arg, val in conditions:
             # Validate the conditions and convert them into API parameters.
             # Validate start_date and end_date conditions
@@ -93,14 +96,30 @@ class SearchAnalyticsTable(APITable):
                 if op != '=':
                     raise NotImplementedError
                 params[arg] = val
+            # Handle dimension filters
+            elif arg in self.FILTERABLE_DIMENSIONS:
+                if op not in ['=', '!=', 'like', 'not like']:
+                    raise NotImplementedError(
+                        f"Operator '{op}' not supported for dimension filters. "
+                        f"Supported operators: =, !=, LIKE, NOT LIKE"
+                    )
+                dimension_filters[arg] = (op, val)
             else:
-                raise NotImplementedError
+                raise NotImplementedError(
+                    f"Unknown parameter '{arg}'. Valid: start_date, end_date, dimensions, "
+                    f"data_state, type, start_row, site_url, and filterable dimensions "
+                    f"({', '.join(self.FILTERABLE_DIMENSIONS)})"
+                )
             
         if 'hour' in params.get('dimensions', []) and params.get('data_state') != 'hourly_all':
             raise ValueError("When using 'hour' dimension, 'data_state' must be set to 'hourly_all'")
 
         if query.limit is not None:
             params['row_limit'] = query.limit.value
+
+        # Build dimension filter groups if any filters specified
+        if dimension_filters:
+            params['dimensionFilterGroups'] = self._build_dimension_filters(dimension_filters)
 
         # Get the traffic data from the Google Search Console API.
         traffic_data = self.handler. \
@@ -146,6 +165,108 @@ class SearchAnalyticsTable(APITable):
         else:
             # Return 'keys' + metrics for backward compatibility when dimensions not specified
             return ['keys'] + metrics
+
+    def _map_operator_to_gsc(self, sql_op: str, value: str, dimension: str) -> tuple:
+        """
+        Map SQL operator to Google Search Console API operator.
+
+        Args:
+            sql_op: SQL operator (=, !=, like, not like)
+            value: Filter value
+            dimension: Dimension name (for error messages)
+
+        Returns:
+            tuple: (gsc_operator, expression_value)
+
+        Raises:
+            NotImplementedError: If operator is not supported
+        """
+        sql_op_lower = sql_op.lower().strip()
+
+        if sql_op_lower == '=':
+            return ('equals', str(value))
+
+        elif sql_op_lower == '!=':
+            return ('notEquals', str(value))
+
+        elif sql_op_lower == 'like':
+            # Handle LIKE patterns
+            str_value = str(value)
+            if str_value.startswith('%') and str_value.endswith('%'):
+                # %pattern% -> contains
+                pattern = str_value.strip('%')
+                return ('contains', pattern)
+            elif '%' not in str_value:
+                # No wildcards -> exact match
+                return ('equals', str_value)
+            else:
+                # Unsupported pattern (e.g., 'term%' or '%term')
+                raise NotImplementedError(
+                    f"LIKE pattern '{value}' not fully supported for '{dimension}'. "
+                    f"Use '%term%' for substring or 'term' for exact match."
+                )
+
+        elif sql_op_lower == 'not like':
+            # Handle NOT LIKE patterns
+            str_value = str(value)
+            if str_value.startswith('%') and str_value.endswith('%'):
+                # %pattern% -> notContains
+                pattern = str_value.strip('%')
+                return ('notContains', pattern)
+            elif '%' not in str_value:
+                # No wildcards -> not equals
+                return ('notEquals', str_value)
+            else:
+                raise NotImplementedError(
+                    f"NOT LIKE pattern '{value}' not fully supported for '{dimension}'. "
+                    f"Use '%term%' for substring or 'term' for exact match."
+                )
+
+        else:
+            raise NotImplementedError(
+                f"Operator '{sql_op}' not supported for dimension filters. "
+                f"Supported: =, !=, LIKE, NOT LIKE"
+            )
+
+    def _build_dimension_filters(self, dimension_filters: dict) -> list:
+        """
+        Build dimension filter groups for Google Search Console API.
+
+        Args:
+            dimension_filters: Dict mapping dimension names to (operator, value) tuples
+
+        Returns:
+            list: dimensionFilterGroups structure for API
+
+        Example:
+            Input: {'query': ('like', '%mindsdb%'), 'country': ('=', 'USA')}
+            Output: [{
+                "groupType": "and",
+                "filters": [
+                    {"dimension": "query", "operator": "contains", "expression": "mindsdb"},
+                    {"dimension": "country", "operator": "equals", "expression": "USA"}
+                ]
+            }]
+        """
+        if not dimension_filters:
+            return []
+
+        filters = []
+        for dimension, (sql_op, value) in dimension_filters.items():
+            # Map SQL operator to GSC API operator
+            gsc_operator, expression = self._map_operator_to_gsc(sql_op, value, dimension)
+
+            filters.append({
+                "dimension": dimension,
+                "operator": gsc_operator,
+                "expression": expression
+            })
+
+        # Return single filter group with AND logic
+        return [{
+            "groupType": "and",
+            "filters": filters
+        }]
 
 
 class SiteMapsTable(APITable):

@@ -73,6 +73,63 @@ This will return data with columns: `date`, `query`, `country`, `clicks`, `impre
 - `page` - The URL of the page
 - `country` - The country code
 - `device` - The device type (mobile, desktop, tablet)
+- `searchAppearance` - The search appearance type
+
+### Filtering by Dimensions
+
+You can filter results by dimension values without including them in grouping:
+
+~~~~sql
+-- Filter by query (contains match)
+SELECT date, clicks, impressions
+FROM my_console.Analytics
+WHERE start_date = '2024-01-01'
+  AND end_date = '2024-01-31'
+  AND dimensions = 'date'
+  AND query LIKE '%mindsdb%'
+LIMIT 100
+~~~~
+
+~~~~sql
+-- Filter by country (exact match)
+SELECT query, clicks, impressions
+FROM my_console.Analytics
+WHERE start_date = '2024-01-01'
+  AND end_date = '2024-01-31'
+  AND dimensions = 'query'
+  AND country = 'USA'
+LIMIT 100
+~~~~
+
+~~~~sql
+-- Multiple filters (AND logic)
+SELECT page, clicks, impressions
+FROM my_console.Analytics
+WHERE start_date = '2024-01-01'
+  AND end_date = '2024-01-31'
+  AND dimensions = 'page'
+  AND query LIKE '%tutorial%'
+  AND country = 'USA'
+  AND device = 'MOBILE'
+LIMIT 100
+~~~~
+
+#### Supported Filter Operators
+
+- `=` - Exact match (e.g., `country = 'USA'`)
+- `!=` - Not equal (e.g., `device != 'DESKTOP'`)
+- `LIKE '%term%'` - Contains substring (e.g., `query LIKE '%mindsdb%'`)
+- `NOT LIKE '%term%'` - Does not contain (e.g., `query NOT LIKE '%spam%'`)
+
+#### Filterable Dimensions
+
+- `country` - Country code (ISO 3166-1 alpha-3)
+- `device` - Device type (DESKTOP, MOBILE, TABLET)
+- `page` - Page URL
+- `query` - Search query string
+- `searchAppearance` - Search appearance type
+
+**Note:** You can filter by a dimension without including it in the `dimensions` parameter for grouping. Multiple filters are combined with AND logic.
 
 ## Submit a sitemap to Google Search Console
 
