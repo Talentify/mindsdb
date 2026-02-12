@@ -201,9 +201,22 @@ class GoogleSearchConsoleHandler(APIHandler):
         response = (
             service.searchanalytics().query(siteUrl=site_url, body=search_analytics_query_request).execute()
         )
+
+        # Get dimensions from params to determine column structure
+        dimensions = params.get("dimensions", [])
+
         if "rows" not in response:
-            return pd.DataFrame(columns=self.analytics.get_columns())
+            return pd.DataFrame(columns=self.analytics.get_columns(dimensions))
+
         df = pd.DataFrame(response["rows"], columns=self.analytics.get_columns())
+
+        # Expand keys list into separate dimension columns
+        if dimensions and 'keys' in df.columns and len(df) > 0:
+            keys_data = df['keys'].tolist()
+            for i, dim_name in enumerate(dimensions):
+                df[dim_name] = [keys[i] if keys and len(keys) > i else None for keys in keys_data]
+            df = df.drop('keys', axis=1)
+
         return df
 
     def get_sitemaps(self, params: dict = None) -> DataFrame:

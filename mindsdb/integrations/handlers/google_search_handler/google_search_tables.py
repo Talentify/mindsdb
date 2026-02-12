@@ -106,10 +106,13 @@ class SearchAnalyticsTable(APITable):
         traffic_data = self.handler. \
             call_application_api(method_name='get_traffic_data', params=params)
 
+        # Get dimensions from params for dynamic column handling
+        dimensions = params.get('dimensions', [])
+
         selected_columns = []
         for target in query.targets:
             if isinstance(target, ast.Star):
-                selected_columns = self.get_columns()
+                selected_columns = self.get_columns(dimensions)
                 break
             elif isinstance(target, ast.Identifier):
                 selected_columns.append(target.parts[-1])
@@ -118,20 +121,31 @@ class SearchAnalyticsTable(APITable):
         if len(traffic_data) == 0:
             traffic_data = pd.DataFrame([], columns=selected_columns)
         else:
-            traffic_data.columns = self.get_columns()
+            # Traffic data already has correct columns from get_traffic_data transformation
+            # Only drop columns that weren't selected
             for col in set(traffic_data.columns).difference(set(selected_columns)):
                 traffic_data = traffic_data.drop(col, axis=1)
         return traffic_data
 
-    def get_columns(self) -> list:
-        """Gets all columns to be returned in pandas DataFrame responses"""
-        return [
-            'keys',
-            'clicks',
-            'impressions',
-            'ctr',
-            'position'
-        ]
+    def get_columns(self, dimensions=None) -> list:
+        """Gets all columns to be returned in pandas DataFrame responses
+
+        Args:
+            dimensions (list, optional): List of dimension names. If provided, returns
+                dimension columns followed by metric columns. If None, returns only
+                metric columns for aggregated data.
+
+        Returns:
+            list: Column names for the DataFrame
+        """
+        metrics = ['clicks', 'impressions', 'ctr', 'position']
+
+        if dimensions:
+            # Return dimension columns + metric columns
+            return dimensions + metrics
+        else:
+            # Return 'keys' + metrics for backward compatibility when dimensions not specified
+            return ['keys'] + metrics
 
 
 class SiteMapsTable(APITable):

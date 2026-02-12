@@ -37,16 +37,42 @@ Google Search data as well as to process Google Search data.
 Let's get traffic data for a specific site.
 
 ~~~~sql
-SELECT clicks
+SELECT *
 FROM my_console.Analytics
 WHERE siteUrl = 'https://www.mindsdb.com'
-  AND startDate = '2020-10-01'
-  AND endDate = '2020-10-31'
+  AND start_date = '2020-10-01'
+  AND end_date = '2020-10-31'
   AND dimensions = 'query'
-  AND type = 'web'
-GROUP BY query
-ORDER BY clicks
 ~~~~
+
+This will return data with columns: `query`, `clicks`, `impressions`, `ctr`, `position`
+
+### Using Multiple Dimensions
+
+You can specify multiple dimensions to break down your data:
+
+~~~~sql
+SELECT *
+FROM my_console.Analytics
+WHERE siteUrl = 'https://www.mindsdb.com'
+  AND start_date = '2020-10-01'
+  AND end_date = '2020-10-31'
+  AND dimensions IN ('date', 'query', 'country')
+LIMIT 100
+~~~~
+
+This will return data with columns: `date`, `query`, `country`, `clicks`, `impressions`, `ctr`, `position`
+
+**Note**: The dimension values are automatically expanded into separate columns for easy querying and analysis. Previously, these values were stored in a `keys` array column.
+
+### Available Dimensions
+
+- `date` - The date of the data
+- `hour` - The hour of the data (requires `data_state = 'hourly_all'`)
+- `query` - The search query
+- `page` - The URL of the page
+- `country` - The country code
+- `device` - The device type (mobile, desktop, tablet)
 
 ## Submit a sitemap to Google Search Console
 
