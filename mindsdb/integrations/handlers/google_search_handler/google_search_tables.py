@@ -3,9 +3,10 @@ from mindsdb_sql_parser import ast
 from pandas import DataFrame
 
 from mindsdb.integrations.libs.api_handler import APITable
-from mindsdb.integrations.utilities.date_utils import parse_utc_date
 from mindsdb.integrations.utilities.sql_utils import extract_comparison_conditions
+from mindsdb.utilities import log
 
+logger = log.getLogger("mindsdb")
 
 class SearchAnalyticsTable(APITable):
     """
@@ -22,35 +23,48 @@ class SearchAnalyticsTable(APITable):
         Returns:
             Response: Response object containing the results.
         """
-
         # Parse the query to get the conditions.
-        conditions = extract_comparison_conditions(query.where)
+        conditions = extract_comparison_conditions(query.where) if query.where else []
         # Get the start and end times from the conditions.
         params = {}
-        # Note: siteUrl is now optional in WHERE clause (taken from connection if not specified)
-        accepted_params = ['siteUrl', 'dimensions', 'type', 'rowLimit', 'aggregationType']
-        for op, arg1, arg2 in conditions:
-            if arg1 == 'startDate' or arg1 == 'endDate':
-                date = parse_utc_date(arg2)
-                if op == '=':
-                    params[arg1] = date
+
+        if 'start_date' not in [arg1 for _, arg1, _ in conditions]:
+            raise ValueError('start_date is required in WHERE clause (e.g., WHERE start_date = "2023-01-01")')
+
+        if 'end_date' not in [arg1 for _, arg1, _ in conditions]:
+            raise ValueError('end_date is required in WHERE clause (e.g., WHERE end_date = "2023-01-01")')
+
+        accepted_params = ['site_url', 'type', 'row_limit']
+        accepted_dimensions = ['date', "hour", 'query', 'page', 'country', 'device']
+        for op, arg, val in conditions:
+            if arg in ['start_date']:
+                if op in ['=']:
+                    params['start_date'] = val
                 else:
-                    raise NotImplementedError
-            elif arg1 in accepted_params:
+                    raise NotImplementedError(f"Operator '{op}' not supported for start_date. Use '=', '>=', or '>'")
+            elif arg in ['end_date']:
+                if op in ['=']:
+                    params['end_date'] = val
+                else:
+                    raise NotImplementedError(f"Operator '{op}' not supported for end_date. Use '=', '<=', or '<'")
+            elif arg in ['dimensions']:
+                if op not in ['=', "in"]:
+                    raise NotImplementedError(f"Operator '{op}' not supported for dimension. Use '=' or 'IN'")
+                if isinstance(val, str):
+                    val = [val]
+                if not isinstance(val, list):
+                    raise ValueError("Dimensions must be provided as a list or a single string value.")
+
+                for v in val:
+                    if v not in accepted_dimensions:
+                        raise ValueError(f"Invalid dimension '{v}'. Accepted dimensions are: {accepted_dimensions}")
+
+                params['dimensions'] = val
+
+            elif arg in accepted_params:
                 if op != '=':
                     raise NotImplementedError
-                params[arg1] = arg2
-            else:
-                raise NotImplementedError
-
-        dimensions = ['query', 'page', 'device', 'country']
-
-        # Get the group by from the query.
-        params['dimensions'] = {}
-        conditions = extract_comparison_conditions(query.group_by)
-        for arg1 in conditions:
-            if arg1 in dimensions:
-                params['dimensions'][arg1] = arg1
+                params[arg] = val
             else:
                 raise NotImplementedError
 
@@ -64,7 +78,7 @@ class SearchAnalyticsTable(APITable):
                 raise NotImplementedError
 
         if query.limit is not None:
-            params['rowLimit'] = query.limit.value
+            params['row_limit'] = query.limit.value
 
         # Get the traffic data from the Google Search Console API.
         traffic_data = self.handler. \
@@ -79,7 +93,6 @@ class SearchAnalyticsTable(APITable):
                 selected_columns.append(target.parts[-1])
             else:
                 raise ValueError(f"Unknown query target {type(target)}")
-
         if len(traffic_data) == 0:
             traffic_data = pd.DataFrame([], columns=selected_columns)
         else:
@@ -130,7 +143,7 @@ class SiteMapsTable(APITable):
                 raise NotImplementedError
 
         if query.limit is not None:
-            params['rowLimit'] = query.limit.value
+            params['row_limit'] = query.limit.value
 
         # Get the traffic data from the Google Search Console API.
         sitemaps = self.handler. \
