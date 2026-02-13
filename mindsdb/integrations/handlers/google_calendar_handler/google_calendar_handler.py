@@ -349,17 +349,17 @@ class GoogleCalendarHandler(APIHandler):
         if params.get("time_max") is None:
             params["time_max"] = (datetime.now() + timedelta(days=7)).strftime("%Y-%m-%dT23:59:59Z") # Default to 7 days
         # Defaults to user's timezone
-        if params.get("timezone") is None:
-            params["timezone"] = service.settings().get(setting="timezone").execute().get("value", "UTC")
+        if params.get("time_zone") is None:
+            params["time_zone"] = service.settings().get(setting="time_zone").execute().get("value", "UTC")
         
-        logger.info(params["timezone"])
+        logger.info(params["time_zone"])
         
         # Build request body
         body = {
             "items": [{"id": cal_id} for cal_id in calendar_ids],
             "timeMin": params.get("time_min"),
             "timeMax": params.get("time_max"),
-            "timeZone": params.get("timezone", "UTC"),
+            "timeZone": params.get("time_zone", "UTC"),
         }
         
         logger.info(f"FreeBusy request body: {body}")
@@ -379,7 +379,7 @@ class GoogleCalendarHandler(APIHandler):
                         "status": "busy",
                         "start": period.get("start"),
                         "end": period.get("end"),
-                        "timezone": params.get("timezone", "UTC")
+                        "time_zone": params.get("time_zone", "UTC")
                     })
 
             if not all_busy_times:

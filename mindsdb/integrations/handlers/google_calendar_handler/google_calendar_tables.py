@@ -120,7 +120,7 @@ class GoogleCalendarEventsTable(APITable):
             "creator",
             "organizer",
             "reminders",
-            "timeZone",
+            "time_zone",
             "calendar_id",
             "attendees",
         }
@@ -361,11 +361,11 @@ class GoogleCalendarFreeBusyTable(APITable):
                     params["calendar_id"] = arg2
                 else:
                     raise NotImplementedError(f"Operator {op} not supported for calendar_id. Use only '=' or 'IN' operator.")
-            elif arg1 in ["timezone"]:
+            elif arg1 in ["time_zone"]:
                 if op == "=":
-                    params["timezone"] = arg2
+                    params["time_zone"] = arg2
                 else:
-                    raise NotImplementedError(f"Operator {op} not supported for timezone. Use only '=' operator.")
+                    raise NotImplementedError(f"Operator {op} not supported for time_zone. Use only '=' operator.")
 
         # Extract selected columns
         selected_columns = []
@@ -399,7 +399,7 @@ class GoogleCalendarFreeBusyTable(APITable):
             "status",
             "start",
             "end",
-            "timezone"
+            "time_zone"
         ]
 
     def insert(self, query: ast.Insert):
