@@ -37,16 +37,99 @@ Google Search data as well as to process Google Search data.
 Let's get traffic data for a specific site.
 
 ~~~~sql
-SELECT clicks
+SELECT *
 FROM my_console.Analytics
 WHERE siteUrl = 'https://www.mindsdb.com'
-  AND startDate = '2020-10-01'
-  AND endDate = '2020-10-31'
+  AND start_date = '2020-10-01'
+  AND end_date = '2020-10-31'
   AND dimensions = 'query'
-  AND type = 'web'
-GROUP BY query
-ORDER BY clicks
 ~~~~
+
+This will return data with columns: `query`, `clicks`, `impressions`, `ctr`, `position`
+
+### Using Multiple Dimensions
+
+You can specify multiple dimensions to break down your data:
+
+~~~~sql
+SELECT *
+FROM my_console.Analytics
+WHERE siteUrl = 'https://www.mindsdb.com'
+  AND start_date = '2020-10-01'
+  AND end_date = '2020-10-31'
+  AND dimensions IN ('date', 'query', 'country')
+LIMIT 100
+~~~~
+
+This will return data with columns: `date`, `query`, `country`, `clicks`, `impressions`, `ctr`, `position`
+
+**Note**: The dimension values are automatically expanded into separate columns for easy querying and analysis. Previously, these values were stored in a `keys` array column.
+
+### Available Dimensions
+
+- `date` - The date of the data
+- `hour` - The hour of the data (requires `data_state = 'hourly_all'`)
+- `query` - The search query
+- `page` - The URL of the page
+- `country` - The country code
+- `device` - The device type (mobile, desktop, tablet)
+- `searchAppearance` - The search appearance type
+
+### Filtering by Dimensions
+
+You can filter results by dimension values without including them in grouping:
+
+~~~~sql
+-- Filter by query (contains match)
+SELECT date, clicks, impressions
+FROM my_console.Analytics
+WHERE start_date = '2024-01-01'
+  AND end_date = '2024-01-31'
+  AND dimensions = 'date'
+  AND query LIKE '%mindsdb%'
+LIMIT 100
+~~~~
+
+~~~~sql
+-- Filter by country (exact match)
+SELECT query, clicks, impressions
+FROM my_console.Analytics
+WHERE start_date = '2024-01-01'
+  AND end_date = '2024-01-31'
+  AND dimensions = 'query'
+  AND country = 'USA'
+LIMIT 100
+~~~~
+
+~~~~sql
+-- Multiple filters (AND logic)
+SELECT page, clicks, impressions
+FROM my_console.Analytics
+WHERE start_date = '2024-01-01'
+  AND end_date = '2024-01-31'
+  AND dimensions = 'page'
+  AND query LIKE '%tutorial%'
+  AND country = 'USA'
+  AND device = 'MOBILE'
+LIMIT 100
+~~~~
+
+#### Supported Filter Operators
+
+- `=` - Exact match (e.g., `country = 'USA'`)
+- `!=` - Not equal (e.g., `device != 'DESKTOP'`)
+- `LIKE '%term%'` - Contains substring (e.g., `query LIKE '%mindsdb%'`)
+- `NOT LIKE '%term%'` - Does not contain (e.g., `query NOT LIKE '%spam%'`)
+
+#### Filterable Dimensions
+
+- `country` - Country code (ISO 3166-1 alpha-3)
+- `device` - Device type (DESKTOP, MOBILE, TABLET)
+- `page` - Page URL
+- `query` - Search query string
+- `searchAppearance` - Search appearance type
+
+**Note:** You can filter by a dimension without including it in the `dimensions` parameter for grouping. Multiple filters are combined with AND logic.
 
 ## Submit a sitemap to Google Search Console
 

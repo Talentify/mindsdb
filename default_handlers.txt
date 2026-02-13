@@ -19,6 +19,7 @@ gitlab
 gmail
 tripadvisor
 google_analytics
+google_search
 google_books
 google_calendar
 google_fit
