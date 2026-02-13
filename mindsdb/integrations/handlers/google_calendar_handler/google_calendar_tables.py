@@ -1,12 +1,23 @@
 import pandas as pd
-import datetime
+from datetime import datetime, time
 from mindsdb_sql_parser import ast
 from pandas import DataFrame
 
 from mindsdb.integrations.libs.api_handler import APITable
-from mindsdb.integrations.utilities.date_utils import utc_date_str_to_timestamp_ms, parse_utc_date
+from mindsdb.integrations.utilities.date_utils import utc_date_str_to_timestamp_ms, parse_local_date
 from mindsdb.integrations.utilities.sql_utils import extract_comparison_conditions
 
+def format_time_min(date_str: str) -> str:
+    """Converts a date string to UTC ISO format expected by Google Calendar API."""
+    dt = parse_local_date(date_str)
+    return dt.strftime("%Y-%m-%dT%H:%M:%SZ")
+
+def format_time_max(date_str: str) -> str:
+    """Converts a date string to UTC ISO format expected by Google Calendar API."""
+    dt = parse_local_date(date_str)
+    if dt.time() == time(0, 0):
+        dt = dt.replace(hour=23, minute=59, second=59)
+    return dt.strftime("%Y-%m-%dT%H:%M:%SZ")
 
 class GoogleCalendarEventsTable(APITable):
     def select(self, query: ast.Select) -> DataFrame:
@@ -26,22 +37,22 @@ class GoogleCalendarEventsTable(APITable):
         params = {}
         for op, arg1, arg2 in conditions:
             # Handle both snake_case and camelCase for backward compatibility
-            if arg1 in ["timeMax", "time_max"]:
-                date = parse_utc_date(arg2)
+            if arg1 in ["time_max"]:
+                date = format_time_max(arg2)
                 if op == "=":
-                    params["timeMax"] = date
+                    params["time_max"] = date
                 else:
                     raise NotImplementedError
-            elif arg1 in ["timeMin", "time_min"]:
-                date = parse_utc_date(arg2)
+            elif arg1 in ["time_min"]:
+                date = format_time_min(arg2)
                 if op == "=":
-                    params["timeMin"] = date
+                    params["time_min"] = date
                 else:
                     raise NotImplementedError
-            elif arg1 in ["timeZone", "time_zone"]:
-                params["timeZone"] = arg2
-            elif arg1 in ["maxAttendees", "max_attendees"]:
-                params["maxAttendees"] = arg2
+            elif arg1 in ["time_zone"]:
+                params["time_zone"] = arg2
+            elif arg1 in ["max_attendees"]:
+                params["max_attendees"] = arg2
             elif arg1 == "q":
                 params["q"] = arg2
             elif arg1 == "calendar_id":
@@ -54,14 +65,14 @@ class GoogleCalendarEventsTable(APITable):
         if query.order_by is not None:
             order_col = query.order_by[0].value
             if order_col in ["start_time", "start"]:
-                params["orderBy"] = "startTime"
+                params["order_by"] = "startTime"
             elif order_col == "updated":
-                params["orderBy"] = "updated"
+                params["order_by"] = "updated"
             else:
                 raise NotImplementedError(f"ORDER BY {order_col} not supported")
 
         if query.limit is not None:
-            params["maxResults"] = query.limit.value
+            params["max_results"] = query.limit.value
 
         # Get the events from the Google Calendar API.
         events = self.handler.call_application_api(method_name="get_events", params=params)
@@ -123,18 +134,18 @@ class GoogleCalendarEventsTable(APITable):
             else:
                 raise NotImplementedError
 
-        st = datetime.datetime.fromtimestamp(event_data["start_time"] / 1000, datetime.timezone.utc).isoformat() + "Z"
-        et = datetime.datetime.fromtimestamp(event_data["end_time"] / 1000, datetime.timezone.utc).isoformat() + "Z"
+        # st = datetime.datetime.fromtimestamp(event_data["start_time"] / 1000, datetime.timezone.utc).isoformat() + "Z"
+        # et = datetime.datetime.fromtimestamp(event_data["end_time"] / 1000, datetime.timezone.utc).isoformat() + "Z"
 
-        event_data["start"] = {"dateTime": st, "timeZone": event_data["timeZone"]}
+        # event_data["start"] = {"dateTime": st, "timeZone": event_data["timeZone"]}
 
-        event_data["end"] = {"dateTime": et, "timeZone": event_data["timeZone"]}
+        # event_data["end"] = {"dateTime": et, "timeZone": event_data["timeZone"]}
 
-        event_data["attendees"] = event_data["attendees"].split(",")
-        event_data["attendees"] = [{"email": attendee} for attendee in event_data["attendees"]]
+        # event_data["attendees"] = event_data["attendees"].split(",")
+        # event_data["attendees"] = [{"email": attendee} for attendee in event_data["attendees"]]
 
         # Insert the event into the Google Calendar API.
-        self.handler.call_application_api(method_name="create_event", params=event_data)
+        # self.handler.call_application_api(method_name="create_event", params=event_data)
 
     def update(self, query: ast.Update):
         """
@@ -171,12 +182,12 @@ class GoogleCalendarEventsTable(APITable):
             else:
                 raise NotImplementedError
 
-        event_data["start"] = {"dateTime": event_data["start_time"], "timeZone": event_data["timeZone"]}
+        # event_data["start"] = {"dateTime": event_data["start_time"], "timeZone": event_data["timeZone"]}
 
-        event_data["end"] = {"dateTime": event_data["end_time"], "timeZone": event_data["timeZone"]}
+        # event_data["end"] = {"dateTime": event_data["end_time"], "timeZone": event_data["timeZone"]}
 
-        event_data["attendees"] = event_data.get("attendees").split(",")
-        event_data["attendees"] = [{"email": attendee} for attendee in event_data["attendees"]]
+        # event_data["attendees"] = event_data.get("attendees").split(",")
+        # event_data["attendees"] = [{"email": attendee} for attendee in event_data["attendees"]]
 
         conditions = extract_comparison_conditions(query.where)
         for op, arg1, arg2 in conditions:
@@ -335,14 +346,14 @@ class GoogleCalendarFreeBusyTable(APITable):
 
         for op, arg1, arg2 in conditions:
             # Handle both snake_case and camelCase for backward compatibility
-            if arg1 in ["timeMin", "time_min"]:
+            if arg1 in ["time_min"]:
                 if op == "=":
-                    params["time_min"] = parse_utc_date(arg2)
+                    params["time_min"] = format_time_min(arg2)
                 else:
                     raise NotImplementedError(f"Operator {op} not supported for {arg1}. Use only '=' operator.")
-            elif arg1 in ["timeMax", "time_max"]:
+            elif arg1 in ["time_max"]:
                 if op == "=":
-                    params["time_max"] = parse_utc_date(arg2)
+                    params["time_max"] = format_time_max(arg2)
                 else:
                     raise NotImplementedError(f"Operator {op} not supported for {arg1}. Use only '=' operator.")
             elif arg1 == "calendar_id":
@@ -350,8 +361,11 @@ class GoogleCalendarFreeBusyTable(APITable):
                     params["calendar_id"] = arg2
                 else:
                     raise NotImplementedError(f"Operator {op} not supported for calendar_id. Use only '=' or 'IN' operator.")
-            elif arg1 in ["timeZone", "time_zone"]:
-                params["timezone"] = arg2
+            elif arg1 in ["timezone"]:
+                if op == "=":
+                    params["timezone"] = arg2
+                else:
+                    raise NotImplementedError(f"Operator {op} not supported for timezone. Use only '=' operator.")
 
         # Extract selected columns
         selected_columns = []
