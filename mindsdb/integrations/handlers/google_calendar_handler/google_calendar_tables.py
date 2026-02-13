@@ -2,6 +2,7 @@ import pandas as pd
 from datetime import datetime, time
 from mindsdb_sql_parser import ast
 from pandas import DataFrame
+from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
 from mindsdb.integrations.libs.api_handler import APITable
 from mindsdb.integrations.utilities.date_utils import utc_date_str_to_timestamp_ms, parse_local_date
@@ -18,6 +19,14 @@ def format_time_max(date_str: str) -> str:
     if dt.time() == time(0, 0):
         dt = dt.replace(hour=23, minute=59, second=59)
     return dt.strftime("%Y-%m-%dT%H:%M:%SZ")
+
+
+def is_valid_timezone(tz: str) -> bool:
+    try:
+        ZoneInfo(tz)
+        return True
+    except ZoneInfoNotFoundError:
+        return False
 
 class GoogleCalendarEventsTable(APITable):
     def select(self, query: ast.Select) -> DataFrame:
@@ -42,24 +51,27 @@ class GoogleCalendarEventsTable(APITable):
                 if op == "=":
                     params["time_max"] = date
                 else:
-                    raise NotImplementedError
+                    raise NotImplementedError(f"Operator {op} not supported for {arg1}. Use only '=' operator.")
             elif arg1 in ["time_min"]:
                 date = format_time_min(arg2)
                 if op == "=":
                     params["time_min"] = date
                 else:
-                    raise NotImplementedError
+                    raise NotImplementedError(f"Operator {op} not supported for {arg1}. Use only '=' operator.")
             elif arg1 in ["time_zone"]:
-                params["time_zone"] = arg2
-            elif arg1 in ["max_attendees"]:
-                params["max_attendees"] = arg2
+                if op == "=":
+                    if not is_valid_timezone(arg2):
+                        raise ValueError(f"Invalid timezone: {arg2}")
+                    params["time_zone"] = arg2
+                else:
+                    raise NotImplementedError(f"Operator {op} not supported for {arg1}. Use only '=' operator.")
             elif arg1 == "q":
                 params["q"] = arg2
             elif arg1 == "calendar_id":
-                if op == "=":
+                if op in ["=", "in"]:
                     params["calendar_id"] = arg2
                 else:
-                    raise NotImplementedError(f"Operator {op} not supported for calendar_id")
+                    raise NotImplementedError(f"Operator {op} not supported for calendar_id. Use only '=' or 'IN' operator.")
 
         # Get the order by from the query.
         if query.order_by is not None:
@@ -238,23 +250,103 @@ class GoogleCalendarEventsTable(APITable):
     def get_columns(self) -> list:
         """Gets all columns to be returned in pandas DataFrame responses"""
         return [
+            # Identifiers
+            "kind",
             "etag",
             "id",
+            "ical_uid",
+
+            # Basic info
             "status",
+            "event_type",
+            "summary",
+            "description",
+            "location",
+
+            # Links
             "html_link",
+            "hangout_link",
+
+            # Timestamps
             "created",
             "updated",
-            "summary",
-            "creator",
-            "organizer",
-            "start",
-            "end",
-            "time_zone",
-            "calendar_id",
-            "ical_uid",
+
+            # Creator (expanded from nested object)
+            "creator_id",
+            "creator_email",
+            "creator_display_name",
+            "creator_self",
+
+            # Organizer (expanded from nested object)
+            "organizer_id",
+            "organizer_email",
+            "organizer_display_name",
+            "organizer_self",
+
+            # Attendees (kept as array)
+            "attendees",
+
+            # Start time (expanded from nested object)
+            "start_date",
+            "start_date_time",
+            "start_time_zone",
+
+            # End time (expanded from nested object)
+            "end_date",
+            "end_date_time",
+            "end_time_zone",
+
+            # Original start time (expanded from nested object)
+            "original_start_time_date",
+            "original_start_time_date_time",
+            "original_start_time_time_zone",
+
+            # Time metadata
+            "end_time_unspecified",
+
+            # Recurrence
+            "recurrence",
+            "recurring_event_id",
+
+            # Display & behavior
+            "color_id",
+            "visibility",
+            "transparency",
+
+            # Conferencing (kept as nested - too complex)
+            "conference_data",
+
+            # Metadata
             "sequence",
             "reminders",
-            "event_type",
+            "attachments",
+            "extended_properties",
+
+            # Source (expanded from nested object)
+            "source_url",
+            "source_title",
+
+            "locked",
+            "attendees_omitted",
+
+            # Permissions
+            "anyone_can_add_self",
+            "guests_can_invite_others",
+            "guests_can_modify",
+            "guests_can_see_other_guests",
+            "private_copy",
+
+            # Special event types
+            "working_location_properties",
+            "out_of_office_properties",
+            "focus_time_properties",
+            "birthday_properties",
+
+            # Deprecated (included for completeness)
+            "gadget",
+
+            # Handler-added fields (not from API)
+            "calendar_id",
         ]
 
 
@@ -363,6 +455,8 @@ class GoogleCalendarFreeBusyTable(APITable):
                     raise NotImplementedError(f"Operator {op} not supported for calendar_id. Use only '=' or 'IN' operator.")
             elif arg1 in ["time_zone"]:
                 if op == "=":
+                    if not is_valid_timezone(arg2):
+                        raise ValueError(f"Invalid timezone: {arg2}")
                     params["time_zone"] = arg2
                 else:
                     raise NotImplementedError(f"Operator {op} not supported for time_zone. Use only '=' operator.")

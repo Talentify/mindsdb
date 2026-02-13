@@ -61,6 +61,59 @@ def convert_dict_keys_to_snake(data):
         return data
 
 
+def flatten_event_fields(event):
+    """
+    Flatten nested object fields in event data for easier DataFrame handling.
+    Expands simple nested objects (creator, organizer, start, end, etc.) into flat fields.
+    """
+    flattened = dict(event)
+
+    # Flatten creator object
+    if 'creator' in flattened and isinstance(flattened['creator'], dict):
+        creator = flattened.pop('creator')
+        flattened['creator_id'] = creator.get('id')
+        flattened['creator_email'] = creator.get('email')
+        flattened['creator_display_name'] = creator.get('display_name')
+        flattened['creator_self'] = creator.get('self')
+
+    # Flatten organizer object
+    if 'organizer' in flattened and isinstance(flattened['organizer'], dict):
+        organizer = flattened.pop('organizer')
+        flattened['organizer_id'] = organizer.get('id')
+        flattened['organizer_email'] = organizer.get('email')
+        flattened['organizer_display_name'] = organizer.get('display_name')
+        flattened['organizer_self'] = organizer.get('self')
+
+    # Flatten start object
+    if 'start' in flattened and isinstance(flattened['start'], dict):
+        start = flattened.pop('start')
+        flattened['start_date'] = start.get('date')
+        flattened['start_date_time'] = start.get('date_time')
+        flattened['start_time_zone'] = start.get('time_zone')
+
+    # Flatten end object
+    if 'end' in flattened and isinstance(flattened['end'], dict):
+        end = flattened.pop('end')
+        flattened['end_date'] = end.get('date')
+        flattened['end_date_time'] = end.get('date_time')
+        flattened['end_time_zone'] = end.get('time_zone')
+
+    # Flatten original_start_time object
+    if 'original_start_time' in flattened and isinstance(flattened['original_start_time'], dict):
+        original = flattened.pop('original_start_time')
+        flattened['original_start_time_date'] = original.get('date')
+        flattened['original_start_time_date_time'] = original.get('date_time')
+        flattened['original_start_time_time_zone'] = original.get('time_zone')
+
+    # Flatten source object
+    if 'source' in flattened and isinstance(flattened['source'], dict):
+        source = flattened.pop('source')
+        flattened['source_url'] = source.get('url')
+        flattened['source_title'] = source.get('title')
+
+    return flattened
+
+
 class GoogleCalendarHandler(APIHandler):
     """
     A class for handling connections and interactions with the Google Calendar API.
@@ -250,28 +303,46 @@ class GoogleCalendarHandler(APIHandler):
         """
         service = self.connect()
 
-        # Extract and normalize calendar IDs
-        calendar_id_param = params.pop("calendar_id", None) if params else None
-        calendar_ids = self._normalize_calendar_ids(calendar_id_param)
+        # Extract and normalize calendar IDs from params or use default
+        calendar_ids = self._normalize_calendar_ids(params.get("calendar_id"))
+        if not calendar_ids:
+            raise ValueError("calendar_id is required for FreeBusy queries")            
 
-        all_events = pd.DataFrame(columns=self.events.get_columns() + ["calendar_id"])
+        # Defaults for timeMin and timeMax can be set here if desired
+        if params.get("time_min") is None:
+            params["time_min"] = datetime.now().strftime("%Y-%m-%dT%H:%M:%SZ") # Default to now
+        if params.get("time_max") is None:
+            params["time_max"] = (datetime.now() + timedelta(days=7)).strftime("%Y-%m-%dT23:59:59Z") # Default to 7 days
+        # Defaults to user's timezone
+        if params.get("time_zone") is None:
+            params["time_zone"] = service.settings().get(setting="timezone").execute().get("value", "UTC")
+
+        all_events = pd.DataFrame(columns=self.events.get_columns())
+        
+        body = {
+            "timeMin": params.get("time_min"),
+            "timeMax": params.get("time_max"),
+            "timeZone": params.get("time_zone", "UTC"),
+        }
 
         # Fetch events from each calendar
         for calendar_id in calendar_ids:
             try:
                 page_token = None
                 while True:
+                    logger.info(f"Fetching events for calendar {calendar_id} with params: {body} and page_token: {page_token}")
                     events_result = service.events().list(
                         calendarId=calendar_id,
-                        pageToken=page_token,
-                        **(params or {})
+                        **(body or {})
                     ).execute()
 
                     items = events_result.get("items", [])
                     if items:
                         # Convert camelCase keys to snake_case
                         items_snake = [convert_dict_keys_to_snake(item) for item in items]
-                        events_df = pd.DataFrame(items_snake, columns=self.events.get_columns())
+                        # Flatten nested object fields
+                        items_flattened = [flatten_event_fields(item) for item in items_snake]
+                        events_df = pd.DataFrame(items_flattened, columns=self.events.get_columns())
                         # Add calendar_id column for clarity
                         events_df["calendar_id"] = calendar_id
                         all_events = pd.concat([all_events, events_df], ignore_index=True)
@@ -332,7 +403,7 @@ class GoogleCalendarHandler(APIHandler):
         Query free/busy information for specified calendars.
 
         Args:
-            params (dict): Must include calendar_id, timeMin, timeMax
+            params (dict)
         Returns:
             DataFrame with busy time blocks for each calendar
         """
@@ -350,9 +421,7 @@ class GoogleCalendarHandler(APIHandler):
             params["time_max"] = (datetime.now() + timedelta(days=7)).strftime("%Y-%m-%dT23:59:59Z") # Default to 7 days
         # Defaults to user's timezone
         if params.get("time_zone") is None:
-            params["time_zone"] = service.settings().get(setting="time_zone").execute().get("value", "UTC")
-        
-        logger.info(params["time_zone"])
+            params["time_zone"] = service.settings().get(setting="timezone").execute().get("value", "UTC")
         
         # Build request body
         body = {
@@ -361,8 +430,6 @@ class GoogleCalendarHandler(APIHandler):
             "timeMax": params.get("time_max"),
             "timeZone": params.get("time_zone", "UTC"),
         }
-        
-        logger.info(f"FreeBusy request body: {body}")
         try:
             # Call freebusy API
             freebusy_result = service.freebusy().query(body=body).execute()
@@ -443,7 +510,10 @@ class GoogleCalendarHandler(APIHandler):
         }
 
         event = service.events().insert(calendarId=calendar_id, body=event).execute()
-        result_df = pd.DataFrame([event], columns=self.events.get_columns())
+        # Convert camelCase keys to snake_case and flatten nested objects
+        event_snake = convert_dict_keys_to_snake(event)
+        event_flattened = flatten_event_fields(event_snake)
+        result_df = pd.DataFrame([event_flattened], columns=self.events.get_columns())
         result_df["calendar_id"] = calendar_id
         return result_df
 
