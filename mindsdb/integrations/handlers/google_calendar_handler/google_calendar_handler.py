@@ -1,4 +1,6 @@
+from datetime import datetime, timedelta
 import pandas as pd
+import re
 from googleapiclient.discovery import build
 from google.oauth2.credentials import Credentials as OAuthCredentials
 from google.auth.transport.requests import Request
@@ -14,15 +16,49 @@ from mindsdb.utilities import log
 from mindsdb.integrations.utilities.handlers.auth_utilities.google import GoogleUserOAuth2Manager
 from mindsdb.integrations.utilities.handlers.auth_utilities.exceptions import AuthException
 
-from .google_calendar_tables import GoogleCalendarEventsTable
+from .google_calendar_tables import (
+    GoogleCalendarEventsTable,
+    GoogleCalendarListTable,
+    GoogleCalendarFreeBusyTable,
+)
 
 DEFAULT_SCOPES = [
-    "https://www.googleapis.com/auth/calendar",
-    "https://www.googleapis.com/auth/calendar.events",
-    "https://www.googleapis.com/auth/calendar.readonly",
+    "https://www.googleapis.com/auth/calendar.readonly"
 ]
 
 logger = log.getLogger(__name__)
+
+
+def camel_to_snake(name):
+    """Convert camelCase to snake_case"""
+    # Handle special cases
+    if name == "iCalUID":
+        return "ical_uid"
+    # Insert underscore before capital letters and convert to lowercase
+    name = re.sub('(.)([A-Z][a-z]+)', r'\1_\2', name)
+    return re.sub('([a-z0-9])([A-Z])', r'\1_\2', name).lower()
+
+
+def snake_to_camel(name):
+    """Convert snake_case to camelCase"""
+    # Handle special cases
+    if name == "ical_uid":
+        return "iCalUID"
+    if name == "html_link":
+        return "htmlLink"
+    # Split by underscore and capitalize each word except first
+    components = name.split('_')
+    return components[0] + ''.join(x.title() for x in components[1:])
+
+
+def convert_dict_keys_to_snake(data):
+    """Recursively convert dictionary keys from camelCase to snake_case"""
+    if isinstance(data, dict):
+        return {camel_to_snake(k): convert_dict_keys_to_snake(v) for k, v in data.items()}
+    elif isinstance(data, list):
+        return [convert_dict_keys_to_snake(item) for item in data]
+    else:
+        return data
 
 
 class GoogleCalendarHandler(APIHandler):
@@ -67,9 +103,19 @@ class GoogleCalendarHandler(APIHandler):
         if isinstance(self.scopes, str):
             self.scopes = [scope.strip() for scope in self.scopes.split(',') if scope.strip()]
 
+        self.default_calendar_id = self.connection_data.get("calendar_id", "primary")
+
         events = GoogleCalendarEventsTable(self)
         self.events = events
         self._register_table("events", events)
+
+        calendar_list = GoogleCalendarListTable(self)
+        self.calendar_list = calendar_list
+        self._register_table("calendar_list", calendar_list)
+
+        free_busy = GoogleCalendarFreeBusyTable(self)
+        self.free_busy = free_busy
+        self._register_table("free_busy", free_busy)
 
     def connect(self, **kwargs):
         """
@@ -159,6 +205,26 @@ class GoogleCalendarHandler(APIHandler):
         self.is_connected = response.success
         return response
 
+    def _normalize_calendar_ids(self, calendar_id_param=None):
+        """
+        Normalize calendar_id parameter to a list of calendar IDs.
+
+        Args:
+            calendar_id_param: Single calendar ID, comma-separated string, or list
+
+        Returns:
+            list: List of calendar IDs
+        """
+        if calendar_id_param is None:
+            calendar_id_param = self.default_calendar_id
+
+        if isinstance(calendar_id_param, list):
+            return calendar_id_param
+        elif isinstance(calendar_id_param, str):
+            return [cid.strip() for cid in calendar_id_param.split(',') if cid.strip()]
+        else:
+            return [str(calendar_id_param)]
+
     def native_query(self, query: str = None) -> Response:
         """
         Receive raw query and act upon it somehow.
@@ -178,35 +244,174 @@ class GoogleCalendarHandler(APIHandler):
         """
         Get events from Google Calendar API
         Args:
-            params (dict): query parameters
+            params (dict): query parameters, may include 'calendar_id'
         Returns:
             DataFrame
         """
         service = self.connect()
-        page_token = None
-        events = pd.DataFrame(columns=self.events.get_columns())
-        while True:
-            events_result = service.events().list(calendarId="primary", pageToken=page_token, **params).execute()
-            events = pd.concat(
-                [events, pd.DataFrame(events_result.get("items", []), columns=self.events.get_columns())],
-                ignore_index=True,
-            )
-            page_token = events_result.get("nextPageToken")
-            if not page_token:
-                break
-        return events
+
+        # Extract and normalize calendar IDs
+        calendar_id_param = params.pop("calendar_id", None) if params else None
+        calendar_ids = self._normalize_calendar_ids(calendar_id_param)
+
+        all_events = pd.DataFrame(columns=self.events.get_columns() + ["calendar_id"])
+
+        # Fetch events from each calendar
+        for calendar_id in calendar_ids:
+            try:
+                page_token = None
+                while True:
+                    events_result = service.events().list(
+                        calendarId=calendar_id,
+                        pageToken=page_token,
+                        **(params or {})
+                    ).execute()
+
+                    items = events_result.get("items", [])
+                    if items:
+                        # Convert camelCase keys to snake_case
+                        items_snake = [convert_dict_keys_to_snake(item) for item in items]
+                        events_df = pd.DataFrame(items_snake, columns=self.events.get_columns())
+                        # Add calendar_id column for clarity
+                        events_df["calendar_id"] = calendar_id
+                        all_events = pd.concat([all_events, events_df], ignore_index=True)
+
+                    page_token = events_result.get("nextPageToken")
+                    if not page_token:
+                        break
+
+            except Exception as e:
+                logger.error(f"Error fetching events from calendar {calendar_id}: {e}")
+                # Continue with next calendar instead of failing completely
+                continue
+
+        return all_events
+
+    def get_calendar_list(self, params: dict = None) -> pd.DataFrame:
+        """
+        Get list of calendars accessible to the user.
+        Filters by calendar_id from connection params if specified.
+
+        Args:
+            params (dict): query parameters
+        Returns:
+            DataFrame with calendar metadata
+        """
+        service = self.connect()
+
+        # Get all calendars from API
+        try:
+            calendar_list_result = service.calendarList().list().execute()
+            items = calendar_list_result.get("items", [])
+
+            if not items:
+                return pd.DataFrame([], columns=self.calendar_list.get_columns())
+
+            # Filter by calendar_id if specified in connection params
+            calendar_ids = self._normalize_calendar_ids(self.default_calendar_id)
+
+            # If default is "primary", show all calendars
+            # Otherwise, filter to only specified calendars
+            if calendar_ids != ["primary"]:
+                items = [item for item in items if item.get("id") in calendar_ids]
+
+            # Convert camelCase keys to snake_case
+            items_snake = [convert_dict_keys_to_snake(item) for item in items]
+
+            # Create DataFrame
+            calendars_df = pd.DataFrame(items_snake, columns=self.calendar_list.get_columns())
+
+            return calendars_df
+
+        except Exception as e:
+            logger.error(f"Error fetching calendar list: {e}")
+            return pd.DataFrame([], columns=self.calendar_list.get_columns())
+
+    def get_free_busy(self, params: dict = None) -> pd.DataFrame:
+        """
+        Query free/busy information for specified calendars.
+
+        Args:
+            params (dict): Must include calendar_id, timeMin, timeMax
+        Returns:
+            DataFrame with busy time blocks for each calendar
+        """
+        service = self.connect()
+
+        # Extract and normalize calendar IDs from params or use default
+        calendar_ids = self._normalize_calendar_ids(params.get("calendar_id"))
+        if not calendar_ids:
+            raise ValueError("calendar_id is required for FreeBusy queries")            
+
+        # Defaults for timeMin and timeMax can be set here if desired
+        if params.get("time_min") is None:
+            params["time_min"] = datetime.now().strftime("%Y-%m-%dT%H:%M:%SZ") # Default to now
+        if params.get("time_max") is None:
+            params["time_max"] = (datetime.now() + timedelta(days=7)).strftime("%Y-%m-%dT23:59:59Z") # Default to 7 days
+        # Defaults to user's timezone
+        if params.get("timezone") is None:
+            params["timezone"] = service.settings().get(setting="timezone").execute().get("value", "UTC")
+        
+        logger.info(params["timezone"])
+        
+        # Build request body
+        body = {
+            "items": [{"id": cal_id} for cal_id in calendar_ids],
+            "timeMin": params.get("time_min"),
+            "timeMax": params.get("time_max"),
+            "timeZone": params.get("timezone", "UTC"),
+        }
+        
+        logger.info(f"FreeBusy request body: {body}")
+        try:
+            # Call freebusy API
+            freebusy_result = service.freebusy().query(body=body).execute()
+
+            # Extract busy periods for each calendar
+            calendars_data = freebusy_result.get("calendars", {})
+
+            all_busy_times = []
+            for calendar_id, calendar_data in calendars_data.items():
+                busy_periods = calendar_data.get("busy", [])
+                for period in busy_periods:
+                    all_busy_times.append({
+                        "calendar_id": calendar_id,
+                        "status": "busy",
+                        "start": period.get("start"),
+                        "end": period.get("end"),
+                        "timezone": params.get("timezone", "UTC")
+                    })
+
+            if not all_busy_times:
+                return pd.DataFrame([], columns=self.free_busy.get_columns())
+
+            return pd.DataFrame(all_busy_times, columns=self.free_busy.get_columns())
+
+        except Exception as e:
+            logger.error(f"Error fetching free/busy information: {e}")
+            return pd.DataFrame([], columns=self.free_busy.get_columns())
 
     def create_event(self, params: dict = None) -> pd.DataFrame:
         """
         Create an event in the calendar.
         Args:
-            params (dict): query parameters
+            params (dict): query parameters, may include 'calendar_id'
         Returns:
             DataFrame
         """
         service = self.connect()
+
+        # Extract and validate calendar ID for write operation
+        calendar_id_param = params.pop("calendar_id", None) if params else None
+        calendar_ids = self._normalize_calendar_ids(calendar_id_param)
+
+        if len(calendar_ids) > 1:
+            raise ValueError("INSERT operations can only target a single calendar. Please specify one calendar_id.")
+
+        calendar_id = calendar_ids[0]
+
         # Check if 'attendees' is a string and split it into a list
-        if isinstance(params["attendees"], str):
+        if params and isinstance(params.get("attendees"), str):
             params["attendees"] = params["attendees"].split(",")
 
         event = {
@@ -237,50 +442,80 @@ class GoogleCalendarHandler(APIHandler):
             },
         }
 
-        event = service.events().insert(calendarId="primary", body=event).execute()
-        return pd.DataFrame([event], columns=self.events.get_columns())
+        event = service.events().insert(calendarId=calendar_id, body=event).execute()
+        result_df = pd.DataFrame([event], columns=self.events.get_columns())
+        result_df["calendar_id"] = calendar_id
+        return result_df
 
     def update_event(self, params: dict = None) -> pd.DataFrame:
         """
         Update event or events in the calendar.
         Args:
-            params (dict): query parameters
+            params (dict): query parameters, may include 'calendar_id'
         Returns:
             DataFrame
         """
         service = self.connect()
-        df = pd.DataFrame(columns=["eventId", "status"])
-        if params["event_id"]:
+
+        # Extract and validate calendar ID for write operation
+        calendar_id_param = params.pop("calendar_id", None) if params else None
+        calendar_ids = self._normalize_calendar_ids(calendar_id_param)
+
+        if len(calendar_ids) > 1:
+            raise ValueError("UPDATE operations can only target a single calendar. Please specify one calendar_id.")
+
+        calendar_id = calendar_ids[0]
+
+        df = pd.DataFrame(columns=["eventId", "status", "calendar_id"])
+
+        if params.get("event_id"):
             start_id = int(params["event_id"])
             end_id = start_id + 1
-        elif not params["start_id"]:
+        elif not params.get("start_id"):
             start_id = int(params["end_id"]) - 10
-        elif not params["end_id"]:
-            end_id = int(params["start_id"]) + 10
+            end_id = int(params["end_id"])
+        elif not params.get("end_id"):
+            start_id = int(params["start_id"])
+            end_id = start_id + 10
         else:
             start_id = int(params["start_id"])
             end_id = int(params["end_id"])
 
         for i in range(start_id, end_id):
-            event = service.events().get(calendarId="primary", eventId=i).execute()
-            if params["summary"]:
-                event["summary"] = params["summary"]
-            if params["location"]:
-                event["location"] = params["location"]
-            if params["description"]:
-                event["description"] = params["description"]
-            if params["start"]:
-                event["start"]["dateTime"] = params["start"]["dateTime"]
-                event["start"]["timeZone"] = params["start"]["timeZone"]
-            if params["end"]:
-                event["end"]["dateTime"] = params["end"]["dateTime"]
-                event["end"]["timeZone"] = params["end"]["timeZone"]
-            if params["attendees"]:
-                event["attendees"] = [{"email": attendee} for attendee in params["attendees"].split(",")]
-            updated_event = service.events().update(calendarId="primary", eventId=event["id"], body=event).execute()
-            df = pd.concat(
-                [df, pd.DataFrame([{"eventId": updated_event["id"], "status": "updated"}])], ignore_index=True
-            )
+            try:
+                event = service.events().get(calendarId=calendar_id, eventId=str(i)).execute()
+                if params.get("summary"):
+                    event["summary"] = params["summary"]
+                if params.get("location"):
+                    event["location"] = params["location"]
+                if params.get("description"):
+                    event["description"] = params["description"]
+                if params.get("start"):
+                    event["start"]["dateTime"] = params["start"]["dateTime"]
+                    event["start"]["timeZone"] = params["start"]["timeZone"]
+                if params.get("end"):
+                    event["end"]["dateTime"] = params["end"]["dateTime"]
+                    event["end"]["timeZone"] = params["end"]["timeZone"]
+                if params.get("attendees"):
+                    event["attendees"] = [{"email": attendee} for attendee in params["attendees"].split(",")]
+
+                updated_event = service.events().update(
+                    calendarId=calendar_id,
+                    eventId=event["id"],
+                    body=event
+                ).execute()
+
+                df = pd.concat(
+                    [df, pd.DataFrame([{
+                        "eventId": updated_event["id"],
+                        "status": "updated",
+                        "calendar_id": calendar_id
+                    }])],
+                    ignore_index=True
+                )
+            except Exception as e:
+                logger.error(f"Error updating event {i} in calendar {calendar_id}: {e}")
+                continue
 
         return df
 
@@ -288,26 +523,57 @@ class GoogleCalendarHandler(APIHandler):
         """
         Delete event or events in the calendar.
         Args:
-            params (dict): query parameters
+            params (dict): query parameters, may include 'calendar_id'
         Returns:
             DataFrame
         """
         service = self.connect()
-        if params["event_id"]:
-            service.events().delete(calendarId="primary", eventId=params["event_id"]).execute()
-            return pd.DataFrame([{"eventId": params["event_id"], "status": "deleted"}])
+
+        # Extract and validate calendar ID for write operation
+        calendar_id_param = params.pop("calendar_id", None) if params else None
+        calendar_ids = self._normalize_calendar_ids(calendar_id_param)
+        
+        if len(calendar_ids) > 1:
+            raise ValueError("DELETE operations can only target a single calendar. Please specify one calendar_id.")
+
+        calendar_id = calendar_ids[0]
+
+        if params.get("event_id"):
+            try:
+                service.events().delete(calendarId=calendar_id, eventId=params["event_id"]).execute()
+                return pd.DataFrame([{
+                    "eventId": params["event_id"],
+                    "status": "deleted",
+                    "calendar_id": calendar_id
+                }])
+            except Exception as e:
+                logger.error(f"Error deleting event {params['event_id']} from calendar {calendar_id}: {e}")
+                raise
         else:
-            df = pd.DataFrame(columns=["eventId", "status"])
-            if not params["start_id"]:
+            df = pd.DataFrame(columns=["eventId", "status", "calendar_id"])
+
+            if not params.get("start_id"):
                 start_id = int(params["end_id"]) - 10
-            elif not params["end_id"]:
-                end_id = int(params["start_id"]) + 10
+                end_id = int(params["end_id"])
+            elif not params.get("end_id"):
+                start_id = int(params["start_id"])
+                end_id = start_id + 10
             else:
                 start_id = int(params["start_id"])
                 end_id = int(params["end_id"])
+
             for i in range(start_id, end_id):
-                service.events().delete(calendarId="primary", eventId=str(i)).execute()
-                df = pd.concat([df, pd.DataFrame([{"eventId": str(i), "status": "deleted"}])], ignore_index=True)
+                try:
+                    service.events().delete(calendarId=calendar_id, eventId=str(i)).execute()
+                    df = pd.concat([df, pd.DataFrame([{
+                        "eventId": str(i),
+                        "status": "deleted",
+                        "calendar_id": calendar_id
+                    }])], ignore_index=True)
+                except Exception as e:
+                    logger.error(f"Error deleting event {i} from calendar {calendar_id}: {e}")
+                    continue
+
             return df
 
     def call_application_api(self, method_name: str = None, params: dict = None) -> pd.DataFrame:
@@ -327,5 +593,9 @@ class GoogleCalendarHandler(APIHandler):
             return self.update_event(params)
         elif method_name == "delete_event":
             return self.delete_event(params)
+        elif method_name == "get_calendar_list":
+            return self.get_calendar_list(params)
+        elif method_name == "get_free_busy":
+            return self.get_free_busy(params)
         else:
             raise NotImplementedError(f"Unknown method {method_name}")

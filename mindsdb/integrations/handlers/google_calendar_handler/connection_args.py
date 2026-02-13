@@ -49,4 +49,9 @@ connection_args = OrderedDict(
         'description': 'Comma separated OAuth scopes to request',
         'label': 'OAuth Scopes',
     },
+    calendar_id={
+        'type': ARG_TYPE.STR,
+        'description': 'Default calendar ID(s) to query. Can be a single calendar ID, "primary", or comma-separated list. Defaults to "primary".',
+        'label': 'Calendar ID',
+    },
 )

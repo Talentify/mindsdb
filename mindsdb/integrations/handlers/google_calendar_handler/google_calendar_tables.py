@@ -25,27 +25,40 @@ class GoogleCalendarEventsTable(APITable):
         # Get the start and end times from the conditions.
         params = {}
         for op, arg1, arg2 in conditions:
-            if arg1 == "timeMax" or arg1 == "timeMin":
+            # Handle both snake_case and camelCase for backward compatibility
+            if arg1 in ["timeMax", "time_max"]:
                 date = parse_utc_date(arg2)
                 if op == "=":
-                    params[arg1] = date
+                    params["timeMax"] = date
                 else:
                     raise NotImplementedError
-            elif arg1 == "timeZone":
-                params[arg1] = arg2
-            elif arg1 == "maxAttendees":
-                params[arg1] = arg2
+            elif arg1 in ["timeMin", "time_min"]:
+                date = parse_utc_date(arg2)
+                if op == "=":
+                    params["timeMin"] = date
+                else:
+                    raise NotImplementedError
+            elif arg1 in ["timeZone", "time_zone"]:
+                params["timeZone"] = arg2
+            elif arg1 in ["maxAttendees", "max_attendees"]:
+                params["maxAttendees"] = arg2
             elif arg1 == "q":
-                params[arg1] = arg2
+                params["q"] = arg2
+            elif arg1 == "calendar_id":
+                if op == "=":
+                    params["calendar_id"] = arg2
+                else:
+                    raise NotImplementedError(f"Operator {op} not supported for calendar_id")
 
         # Get the order by from the query.
         if query.order_by is not None:
-            if query.order_by[0].value == "start_time":
+            order_col = query.order_by[0].value
+            if order_col in ["start_time", "start"]:
                 params["orderBy"] = "startTime"
-            elif query.order_by[0].value == "updated":
+            elif order_col == "updated":
                 params["orderBy"] = "updated"
             else:
-                raise NotImplementedError
+                raise NotImplementedError(f"ORDER BY {order_col} not supported")
 
         if query.limit is not None:
             params["maxResults"] = query.limit.value
@@ -217,7 +230,7 @@ class GoogleCalendarEventsTable(APITable):
             "etag",
             "id",
             "status",
-            "htmlLink",
+            "html_link",
             "created",
             "updated",
             "summary",
@@ -225,9 +238,161 @@ class GoogleCalendarEventsTable(APITable):
             "organizer",
             "start",
             "end",
-            "timeZone",
-            "iCalUID",
+            "time_zone",
+            "calendar_id",
+            "ical_uid",
             "sequence",
             "reminders",
-            "eventType",
+            "event_type",
         ]
+
+
+class GoogleCalendarListTable(APITable):
+    """Table for querying calendar list metadata"""
+
+    def select(self, query: ast.Select) -> DataFrame:
+        """
+        Gets list of calendars accessible to the user.
+
+        Supports filtering by calendar_id from connection params.
+        """
+        # Parse WHERE conditions (if any)
+        conditions = extract_comparison_conditions(query.where) if query.where else []
+        params = {}
+
+        # Extract selected columns
+        selected_columns = []
+        for target in query.targets:
+            if isinstance(target, ast.Star):
+                selected_columns = self.get_columns()
+                break
+            elif isinstance(target, ast.Identifier):
+                selected_columns.append(target.parts[-1])
+
+        # Call handler method
+        calendars = self.handler.call_application_api(
+            method_name="get_calendar_list",
+            params=params
+        )
+
+        # Format results
+        if len(calendars) == 0:
+            calendars = pd.DataFrame([], columns=selected_columns)
+        else:
+            calendars.columns = self.get_columns()
+            for col in set(calendars.columns).difference(set(selected_columns)):
+                calendars = calendars.drop(col, axis=1)
+
+        return calendars
+
+    def get_columns(self) -> list:
+        """Gets all columns for calendar list"""
+        return [
+            "kind",
+            "etag",
+            "id",
+            "summary",
+            "description",
+            "time_zone",
+            "color_id",
+            "background_color",
+            "foreground_color",
+            "hidden",
+            "selected",
+            "access_role",
+            "primary",
+            "deleted",
+        ]
+
+    def insert(self, query: ast.Insert):
+        raise NotImplementedError("CalendarList table is read-only")
+
+    def update(self, query: ast.Update):
+        raise NotImplementedError("CalendarList table is read-only")
+
+    def delete(self, query: ast.Delete):
+        raise NotImplementedError("CalendarList table is read-only")
+
+
+class GoogleCalendarFreeBusyTable(APITable):
+    """Table for querying free/busy information"""
+
+    def select(self, query: ast.Select) -> DataFrame:
+        """
+        Gets free/busy information for specified calendars.
+
+        Required WHERE conditions:
+        - calendar_id (single or comma-separated list)
+        - time_min (start time)
+        - time_max (end time)
+
+        Optional:
+        - time_zone (defaults to UTC)
+        """
+        # Parse WHERE conditions
+        conditions = extract_comparison_conditions(query.where) if query.where else []
+        params = {}
+
+        for op, arg1, arg2 in conditions:
+            # Handle both snake_case and camelCase for backward compatibility
+            if arg1 in ["timeMin", "time_min"]:
+                if op == "=":
+                    params["time_min"] = parse_utc_date(arg2)
+                else:
+                    raise NotImplementedError(f"Operator {op} not supported for {arg1}. Use only '=' operator.")
+            elif arg1 in ["timeMax", "time_max"]:
+                if op == "=":
+                    params["time_max"] = parse_utc_date(arg2)
+                else:
+                    raise NotImplementedError(f"Operator {op} not supported for {arg1}. Use only '=' operator.")
+            elif arg1 == "calendar_id":
+                if op in ("=", "in"):
+                    params["calendar_id"] = arg2
+                else:
+                    raise NotImplementedError(f"Operator {op} not supported for calendar_id. Use only '=' or 'IN' operator.")
+            elif arg1 in ["timeZone", "time_zone"]:
+                params["timezone"] = arg2
+
+        # Extract selected columns
+        selected_columns = []
+        for target in query.targets:
+            if isinstance(target, ast.Star):
+                selected_columns = self.get_columns()
+                break
+            elif isinstance(target, ast.Identifier):
+                selected_columns.append(target.parts[-1])
+
+        # Call handler method
+        busy_times = self.handler.call_application_api(
+            method_name="get_free_busy",
+            params=params
+        )
+
+        # Format results
+        if len(busy_times) == 0:
+            busy_times = pd.DataFrame([], columns=selected_columns)
+        else:
+            busy_times.columns = self.get_columns()
+            for col in set(busy_times.columns).difference(set(selected_columns)):
+                busy_times = busy_times.drop(col, axis=1)
+
+        return busy_times
+
+    def get_columns(self) -> list:
+        """Gets all columns for free/busy data"""
+        return [
+            "calendar_id",
+            "status",
+            "start",
+            "end",
+            "timezone"
+        ]
+
+    def insert(self, query: ast.Insert):
+        raise NotImplementedError("FreeBusy table is read-only")
+
+    def update(self, query: ast.Update):
+        raise NotImplementedError("FreeBusy table is read-only")
+
+    def delete(self, query: ast.Delete):
+        raise NotImplementedError("FreeBusy table is read-only")
