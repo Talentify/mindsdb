@@ -157,7 +157,23 @@ def parse_xml(content: str) -> pd.DataFrame:
             # Empty XML or no parseable structure
             return pd.DataFrame({'root_tag': [root.tag], 'content': [root.text or '']})
 
-        return pd.DataFrame(records)
+        df = pd.DataFrame(records)
+
+        # Final cleanup: ensure no HTML tags remain in any string columns
+        # This is a defensive measure in case HTML tags were not caught during parsing
+        cleaned_count = 0
+        for col in df.columns:
+            if df[col].dtype == 'object':  # String/object columns
+                # Only clean values that contain '<' (potential HTML)
+                html_mask = df[col].apply(lambda x: pd.notna(x) and isinstance(x, str) and '<' in x)
+                if html_mask.any():
+                    df.loc[html_mask, col] = df.loc[html_mask, col].apply(lambda x: _clean_cdata_content(str(x)))
+                    cleaned_count += html_mask.sum()
+
+        if cleaned_count > 0:
+            logger.info(f"Cleaned HTML tags from {cleaned_count} values during DataFrame post-processing")
+
+        return df
 
     except ET.ParseError as e:
         logger.error(f"XML parsing error: {e}")
@@ -204,8 +220,19 @@ def _clean_cdata_content(text: str) -> Union[str, pd.Timestamp]:
     # Strip leading/trailing whitespace (common in CDATA sections)
     text = text.strip()
 
-    # Remove HTML tags (e.g., <a href="...">URL</a> -> URL)
-    text = re.sub(r'<[^>]+>', '', text)
+    # Extract URL from anchor tag href if present
+    # Matches: <a href="URL" ...>...</a> or <a ...href="URL"...>
+    href_match = re.search(r'<a\s+[^>]*href=["\']([^"\']+)["\'][^>]*>', text, re.IGNORECASE)
+    if href_match:
+        logger.debug(f"Extracting URL from anchor tag: {text[:100]}...")
+        text = href_match.group(1)  # Extract just the URL from href attribute
+
+    # Remove HTML tags (multiple passes for nested tags)
+    # Loop until no more tags are found
+    prev_text = None
+    while prev_text != text:
+        prev_text = text
+        text = re.sub(r'<[^>]+>', '', text)
 
     # Decode HTML entities (e.g., &amp; -> &, &lt; -> <)
     text = unescape(text)
