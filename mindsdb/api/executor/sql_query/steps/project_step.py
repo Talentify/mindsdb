@@ -16,6 +16,7 @@ from mindsdb.api.executor.exceptions import (
 )
 
 from .base import BaseStepCall
+from .fetch_dataframe import get_fill_param_fnc
 
 
 class ProjectStepCall(BaseStepCall):
@@ -36,10 +37,14 @@ class ProjectStepCall(BaseStepCall):
             if col.table_name != col.table_alias:
                 tbl_idx[col.table_alias].append(name)
 
+        # Resolve Parameter nodes from previous step results
+        fill_params = get_fill_param_fnc(self.steps_data)
+        resolved_columns = query_traversal(step.columns, fill_params) or step.columns
+
         # analyze condition and change name of columns
         def check_fields(node, is_table=None, **kwargs):
             if is_table:
-                raise NotSupportedYet('Subqueries is not supported in target')
+                return  # skip table nodes — subqueries already resolved to constants
             if isinstance(node, Identifier):
                 # only column name
                 col_name = node.parts[-1]
@@ -62,13 +67,18 @@ class ProjectStepCall(BaseStepCall):
                     key = (table_name, col_name)
 
                 if key not in col_idx:
-                    raise KeyColumnDoesNotExist(f'Table not found for column: {key}')
+                    simple_cols = [k for k in col_idx.keys() if isinstance(k, str)]
+                    raise KeyColumnDoesNotExist(
+                        f'Column not found: {key}.\n'
+                        f'Available columns: {", ".join(str(c) for c in simple_cols[:20])}'
+                        + (f' ... and {len(simple_cols) - 20} more' if len(simple_cols) > 20 else '')
+                    )
 
                 new_name = col_idx[key]
                 return Identifier(parts=[new_name], alias=node.alias)
 
         query = Select(
-            targets=step.columns,
+            targets=resolved_columns,
             from_table=Identifier('df_table')
         )
 

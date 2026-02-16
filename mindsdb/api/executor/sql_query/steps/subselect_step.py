@@ -184,7 +184,12 @@ class QueryStepCall(BaseStepCall):
                 search_idx = col_idx if column_quoted else lower_col_idx
 
                 if key not in search_idx:
-                    raise KeyColumnDoesNotExist(f"Table not found for column: {key}")
+                    available = [k for k in col_idx.keys() if isinstance(k, str)]
+                    raise KeyColumnDoesNotExist(
+                        f"Column not found: {key}.\n"
+                        f"Available columns: {', '.join(str(c) for c in available[:20])}"
+                        + (f' ... and {len(available) - 20} more' if len(available) > 20 else '')
+                    )
 
                 new_name = search_idx[key]
                 return Identifier(parts=[new_name], alias=node.alias)

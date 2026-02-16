@@ -107,6 +107,7 @@ class PlanJoinTablesQuery:
 
         self.step_stack = None
         self.query_context = {}
+        self.table_columns = {}  # TableInfo -> set of column names
 
         self.partition = None
 
@@ -159,7 +160,12 @@ class PlanJoinTablesQuery:
                 integration = self.planner.default_namespace
 
         if integration is None and not hasattr(table, "sub_select"):
-            raise PlanningException(f"Database not found for: {table}")
+            available_dbs = ", ".join(list(self.planner.databases)[:10])
+            raise PlanningException(
+                f"Database not found for table: {table}.\n"
+                f"Available databases: {available_dbs}\n"
+                "Hint: Use format 'database_name.table_name'"
+            )
 
         sub_select = getattr(table, "sub_select", None)
 
@@ -240,7 +246,11 @@ class PlanJoinTablesQuery:
 
         table_info = self.get_table_for_column(arg1)
         if table_info is None:
-            raise PlanningException(f"Table not found for identifier: {arg1.to_string()}")
+            known = ['.'.join(a) for t in self.tables for a in t.aliases]
+            raise PlanningException(
+                f"Table not found for identifier: {arg1.to_string()}.\n"
+                f"Known tables/aliases: {', '.join(known)}"
+            )
 
         # keep only column name
         arg1.parts = [arg1.parts[-1]]
@@ -308,13 +318,34 @@ class PlanJoinTablesQuery:
         # get all join tables, form join sequence
         join_sequence = self.get_join_sequence(query.from_table)
 
+        # Collect column references per table from SELECT targets and JOIN ON
+        # conditions only (not WHERE — those are pushed down as filter params).
+        # This ensures API-type handlers fetch the right columns.
+        def _collect_fetch_columns(node, is_table, **kwargs):
+            if not is_table and isinstance(node, Identifier) and len(node.parts) > 1:
+                table_info = self.get_table_for_column(node)
+                if table_info is not None:
+                    table_id = id(table_info)
+                    if table_id not in self.table_columns:
+                        self.table_columns[table_id] = set()
+                    self.table_columns[table_id].add(node.parts[-1])
+
+        query_traversal(query.targets, _collect_fetch_columns)
+        for tbl in self.tables:
+            if tbl.join_condition is not None:
+                query_traversal(tbl.join_condition, _collect_fetch_columns)
+
         # find tables for identifiers used in query
         def _check_identifiers(node, is_table, **kwargs):
             if not is_table and isinstance(node, Identifier):
                 if len(node.parts) > 1:
                     table_info = self.get_table_for_column(node)
                     if table_info is None:
-                        raise PlanningException(f"Table not found for identifier: {node.to_string()}")
+                        known = [str(a) for t in self.tables for a in t.aliases]
+                        raise PlanningException(
+                            f"Table not found for identifier: {node.to_string()}.\n"
+                            f"Known tables/aliases: {', '.join(known)}"
+                        )
 
                     # # replace identifies name
                     col_parts = list(table_info.aliases[-1])
@@ -391,14 +422,31 @@ class PlanJoinTablesQuery:
         table = copy.deepcopy(item.table)
         table.parts.insert(0, item.integration)
         table.is_quoted.insert(0, False)
-        query2 = Select(from_table=table, targets=[Star()])
-        # parts = tuple(map(str.lower, table_name.parts))
+
+        # Build WHERE conditions first (from query WHERE + JOIN ON filter params)
         conditions = item.conditions
         if "or" in self.query_context["binary_ops"]:
-            # not use conditions
             conditions = []
-
         conditions += self.get_filters_from_join_conditions(item)
+
+        # Use specific columns from SELECT targets and JOIN ON conditions.
+        # Exclude columns that are filter parameters (pushed as WHERE conditions)
+        # so API handlers (e.g. Google Analytics) don't try to use filter params
+        # like start_date/end_date as SELECT dimensions.
+        referenced_cols = self.table_columns.get(id(item))
+        if referenced_cols:
+            filter_col_names = set()
+            for cond in conditions:
+                if isinstance(cond, BinaryOperation):
+                    for arg in cond.args:
+                        if isinstance(arg, Identifier):
+                            filter_col_names.add(arg.parts[-1])
+            fetch_cols = referenced_cols - filter_col_names
+            targets = [Identifier(parts=[col]) for col in fetch_cols] if fetch_cols else [Star()]
+        else:
+            targets = [Star()]
+
+        query2 = Select(from_table=table, targets=targets)
 
         if self.query_context["use_limit"]:
             order_by = None
@@ -493,7 +541,10 @@ class PlanJoinTablesQuery:
                 arg1, arg2 = arg2, arg1
 
             if isinstance(arg2, Constant):
-                conditions.append(node)
+                conditions.append(copy.deepcopy(node))
+                # Neutralize in the join condition tree so DuckDB doesn't
+                # try to resolve filter params as DataFrame columns.
+                node.args = [Constant(0), Constant(0)]
             elif table2 is not None:
                 data_conditions.append([arg1, arg2])
 

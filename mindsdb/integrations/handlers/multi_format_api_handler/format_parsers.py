@@ -157,7 +157,11 @@ def parse_xml(content: str) -> pd.DataFrame:
             # Empty XML or no parseable structure
             return pd.DataFrame({'root_tag': [root.tag], 'content': [root.text or '']})
 
-        df = pd.DataFrame(records)
+        # Use json_normalize to flatten nested dicts into underscore-separated
+        # column names (e.g. author_name). Then ensure all values are scalars
+        # so DuckDB receives VARCHAR-compatible types, not VARCHAR[].
+        df = pd.json_normalize(records, sep='_')
+        df = _ensure_scalar_columns(df)
 
         # Final cleanup: ensure no HTML tags remain in any string columns
         # This is a defensive measure in case HTML tags were not caught during parsing
@@ -242,6 +246,53 @@ def _clean_cdata_content(text: str) -> Union[str, pd.Timestamp]:
 
     # Try to parse as date
     return _try_parse_date(text)
+
+
+def _serialize_non_scalar(value: Any) -> Any:
+    """
+    Convert non-scalar values (lists, dicts) to string representations
+    suitable for flat DataFrame columns compatible with DuckDB.
+
+    Args:
+        value: Any cell value
+
+    Returns:
+        Scalar value (string, number, timestamp, or None)
+    """
+    if value is None or isinstance(value, (str, int, float, bool, pd.Timestamp)):
+        return value
+    if isinstance(value, list):
+        if len(value) == 0:
+            return ''
+        if all(isinstance(item, (str, int, float)) for item in value):
+            return ', '.join(str(item) for item in value)
+        return json.dumps(value, ensure_ascii=False, default=str)
+    if isinstance(value, dict):
+        return json.dumps(value, ensure_ascii=False, default=str)
+    return str(value)
+
+
+def _ensure_scalar_columns(df: pd.DataFrame) -> pd.DataFrame:
+    """
+    Ensure all DataFrame columns contain only scalar values.
+    Converts any remaining list or dict values to strings so that
+    DuckDB receives only VARCHAR-compatible types.
+
+    Args:
+        df: DataFrame that may contain non-scalar cell values
+
+    Returns:
+        DataFrame with all scalar values
+    """
+    for col in df.columns:
+        if df[col].dtype == 'object':
+            has_non_scalar = df[col].apply(
+                lambda x: isinstance(x, (list, dict))
+            ).any()
+            if has_non_scalar:
+                logger.debug(f"Converting non-scalar values in column '{col}' to strings")
+                df[col] = df[col].apply(_serialize_non_scalar)
+    return df
 
 
 def _xml_element_to_dict(element: ET.Element) -> Dict[str, Any]:

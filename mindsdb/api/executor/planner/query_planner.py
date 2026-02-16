@@ -601,20 +601,35 @@ class QueryPlanner:
             for target in select.targets:
                 if isinstance(target, Identifier):
                     new_query_targets.append(disambiguate_predictor_column_identifier(target, predictor))
-                elif type(target) in (Star, Constant, Function):
+                elif type(target) in (Star, Constant, Function, Parameter):
                     new_query_targets.append(target)
                 else:
-                    raise PlanningException(f"Unknown select target {type(target)}")
+                    raise PlanningException(
+                        f"Unsupported expression in SELECT target: {type(target).__name__}.\n"
+                        "When querying a predictor, targets must be column names, *, constants, or functions.\n"
+                        f"Problematic target: {target}"
+                    )
 
             if select.group_by or select.having:
+                unsupported = []
+                if select.group_by:
+                    unsupported.append("GROUP BY")
+                if select.having:
+                    unsupported.append("HAVING")
                 raise PlanningException(
-                    "Unsupported operation when querying predictor. Only WHERE is allowed and required."
+                    f"Unsupported clause(s) for predictor query: {', '.join(unsupported)}.\n"
+                    "Hint: Wrap the predictor in a subquery first:\n"
+                    "  SELECT ... FROM (SELECT * FROM predictor WHERE ...) GROUP BY ..."
                 )
 
             row_dict = {}
             where_clause = select.where
             if not where_clause:
-                raise PlanningException("WHERE clause required when selecting from predictor")
+                raise PlanningException(
+                    "WHERE clause required when selecting from predictor.\n"
+                    "Predictor queries need input data via WHERE, e.g.:\n"
+                    f"  SELECT * FROM {select.from_table} WHERE column = value"
+                )
 
             predictor_identifier = utils.get_predictor_name_identifier(predictor)
             recursively_extract_column_values(where_clause, row_dict, predictor_identifier)
@@ -748,6 +763,7 @@ class QueryPlanner:
                 or isinstance(target, Function)
                 or isinstance(target, Constant)
                 or isinstance(target, BinaryOperation)
+                or isinstance(target, Parameter)
             ):
                 out_identifiers.append(target)
             else:
