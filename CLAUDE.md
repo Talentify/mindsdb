@@ -125,7 +125,27 @@ if query.cte is not None:
     query.cte = None  # CTEs decomposed into steps; clear so DuckDB doesn't re-execute them
 ```
 
-### 2. JOIN `filter_col_names` must only exclude scalar filters — `plan_join.py`
+### 2. `plan_api_db_select` must NOT forward `order_by` to the handler — `query_planner.py`
+
+`plan_api_db_select` splits a query into a handler fetch (`FetchDataframeStep`) and a DuckDB pass (`SubSelectStep`). It passes `order_by` from the SQL query to the handler, which is wrong: ORDER BY may reference **SQL aliases** (e.g. `SUM(sessions) AS total_sessions` → `ORDER BY total_sessions`) that are meaningless to the underlying API. The GA4 API returns:
+
+> `400 Field total_sessions exists in OrderBy but is not defined in input Dimensions/Metrics list`
+
+The outer SubSelectStep already retains `order_by` (it is not cleared like `where`/`limit`), so DuckDB applies it correctly after aggregation.
+
+```python
+# query_planner.py — plan_api_db_select()
+query2 = Select(
+    targets=query.targets,
+    from_table=query.from_table,
+    where=query.where,
+    # order_by intentionally omitted: ORDER BY may reference SQL aliases unknown
+    # to the underlying API. The SubSelectStep/DuckDB layer handles it correctly.
+    limit=query.limit,
+)
+```
+
+### 3. JOIN `filter_col_names` must only exclude scalar filters — `plan_join.py`
 
 In `process_table()`, `filter_col_names` is computed to strip API filter parameters (e.g., `start_date = 'yesterday'`) from the SELECT column list so they are not sent to the API as dimensions. However, `get_filters_from_join_conditions()` also generates cross-table IN predicates (`page_segment IN (VALUES FROM t1)`), and naively extracting every `Identifier` from every condition will incorrectly remove JOIN dimension columns from the SELECT list, causing the right-hand table in a FULL OUTER JOIN to be missing those columns.
 

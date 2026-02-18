@@ -434,7 +434,9 @@ class QueryPlanner:
             targets=query.targets,
             from_table=query.from_table,
             where=query.where,
-            order_by=query.order_by,
+            # order_by intentionally omitted: ORDER BY may reference SQL aliases
+            # (e.g. SUM(sessions) AS total_sessions) that are unknown to the
+            # underlying API. The outer SubSelectStep/DuckDB layer handles it.
             limit=query.limit,
         )
         prev_step = self.plan_integration_select(query2)
