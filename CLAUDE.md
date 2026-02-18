@@ -145,22 +145,35 @@ query2 = Select(
 )
 ```
 
-### 3. JOIN `filter_col_names` must only exclude scalar filters — `plan_join.py`
+### 3. JOIN column collection must include WHERE — `plan_join.py`
 
-In `process_table()`, `filter_col_names` is computed to strip API filter parameters (e.g., `start_date = 'yesterday'`) from the SELECT column list so they are not sent to the API as dimensions. However, `get_filters_from_join_conditions()` also generates cross-table IN predicates (`page_segment IN (VALUES FROM t1)`), and naively extracting every `Identifier` from every condition will incorrectly remove JOIN dimension columns from the SELECT list, causing the right-hand table in a FULL OUTER JOIN to be missing those columns.
+`_collect_fetch_columns` runs on `query.targets` and `tbl.join_condition`, but columns referenced **only in the WHERE clause** (e.g. `LOWER(t2.sessionSourceMedium) LIKE '%linkedin%'`) are never added to `referenced_cols`. The handler then does not fetch them, and DuckDB fails with `Column not found`.
 
-**Only exclude a column when the condition partner is a `Constant`:**
+**Fix**: also traverse `query.where`:
+
+```python
+query_traversal(query.targets, _collect_fetch_columns)
+query_traversal(query.where, _collect_fetch_columns)   # ← required
+for tbl in self.tables:
+    if tbl.join_condition is not None:
+        query_traversal(tbl.join_condition, _collect_fetch_columns)
+```
+
+### 4. JOIN `filter_col_names` must use `item.conditions`, not `conditions` — `plan_join.py`
+
+`process_table()` computes `filter_col_names` to exclude API filter parameters (e.g. `start_date = 'yesterday'`) from the SELECT list so they aren't sent to the API as dimensions. Two bugs to avoid:
+
+1. **`conditions` is cleared to `[]` when OR is in the WHERE clause** — so filter params would not be excluded, and they'd appear as GA4 dimension targets → 400 error. Use `item.conditions` (pre-OR-clear) instead.
+2. **`IS NULL` is a `BinaryOperation` with `Constant(None)` as the partner** — `landingPagePlusQueryString IS NULL` would wrongly add `landingPagePlusQueryString` to `filter_col_names` and exclude it from the SELECT. Guard with `other.value is not None`.
 
 ```python
 filter_col_names = set()
-for cond in conditions:
+for cond in item.conditions:   # ← item.conditions, not conditions
     if isinstance(cond, BinaryOperation) and len(cond.args) >= 2:
-        # Only exclude scalar filter parameters (col = Constant).
-        # Do NOT exclude JOIN predicates (col IN (Parameter)).
         for i, arg in enumerate(cond.args[:2]):
             if isinstance(arg, Identifier):
                 other = cond.args[1 - i]
-                if isinstance(other, Constant):
+                if isinstance(other, Constant) and other.value is not None:  # ← non-null only
                     filter_col_names.add(arg.parts[-1])
 fetch_cols = referenced_cols - filter_col_names
 ```

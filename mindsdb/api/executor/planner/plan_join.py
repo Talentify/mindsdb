@@ -318,9 +318,10 @@ class PlanJoinTablesQuery:
         # get all join tables, form join sequence
         join_sequence = self.get_join_sequence(query.from_table)
 
-        # Collect column references per table from SELECT targets and JOIN ON
-        # conditions only (not WHERE — those are pushed down as filter params).
-        # This ensures API-type handlers fetch the right columns.
+        # Collect column references per table from SELECT targets, JOIN ON conditions,
+        # and WHERE clause. WHERE columns (e.g. LOWER(t2.sessionSourceMedium) LIKE '...')
+        # must be fetched even though they are not in the SELECT list.
+        # API filter params like start_date/end_date are excluded later via filter_col_names.
         def _collect_fetch_columns(node, is_table, **kwargs):
             if not is_table and isinstance(node, Identifier) and len(node.parts) > 1:
                 table_info = self.get_table_for_column(node)
@@ -331,6 +332,7 @@ class PlanJoinTablesQuery:
                     self.table_columns[table_id].add(node.parts[-1])
 
         query_traversal(query.targets, _collect_fetch_columns)
+        query_traversal(query.where, _collect_fetch_columns)
         for tbl in self.tables:
             if tbl.join_condition is not None:
                 query_traversal(tbl.join_condition, _collect_fetch_columns)
@@ -429,22 +431,23 @@ class PlanJoinTablesQuery:
             conditions = []
         conditions += self.get_filters_from_join_conditions(item)
 
-        # Use specific columns from SELECT targets and JOIN ON conditions.
-        # Exclude columns that are filter parameters (pushed as WHERE conditions)
-        # so API handlers (e.g. Google Analytics) don't try to use filter params
-        # like start_date/end_date as SELECT dimensions.
+        # Use specific columns from SELECT targets, JOIN ON, and WHERE.
+        # Exclude scalar API filter parameters (col = 'value') from the SELECT list
+        # so they aren't sent to API handlers (e.g. GA) as dimensions.
+        # Use item.conditions — not conditions — because OR in WHERE clears conditions=[]
+        # but item.conditions still holds the scalar equality filters we must exclude.
         referenced_cols = self.table_columns.get(id(item))
         if referenced_cols:
             filter_col_names = set()
-            for cond in conditions:
+            for cond in item.conditions:
                 if isinstance(cond, BinaryOperation) and len(cond.args) >= 2:
-                    # Only exclude columns that are scalar filter parameters (col = Constant).
-                    # Do NOT exclude columns used in cross-table JOIN predicates
-                    # (col IN (Parameter)), as those columns must still be fetched.
+                    # Only exclude col = non-null Constant patterns (API filter params).
+                    # Exclude IS NULL (other.value is None) and cross-table predicates
+                    # (Parameter) — those columns must still appear in the SELECT list.
                     for i, arg in enumerate(cond.args[:2]):
                         if isinstance(arg, Identifier):
                             other = cond.args[1 - i]
-                            if isinstance(other, Constant):
+                            if isinstance(other, Constant) and other.value is not None:
                                 filter_col_names.add(arg.parts[-1])
             fetch_cols = referenced_cols - filter_col_names
             targets = [Identifier(parts=[col]) for col in fetch_cols] if fetch_cols else [Star()]
