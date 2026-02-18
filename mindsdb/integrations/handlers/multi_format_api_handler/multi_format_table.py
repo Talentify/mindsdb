@@ -9,7 +9,14 @@ from typing import List, Optional
 import logging
 
 from mindsdb.integrations.libs.api_handler import APIResource
-from mindsdb.integrations.utilities.sql_utils import FilterCondition
+from mindsdb.integrations.utilities.sql_utils import (
+    extract_comparison_conditions,
+    filter_dataframe,
+    sort_dataframe,
+    FilterCondition,
+    FilterOperator,
+    SortColumn,
+)
 
 from .format_parsers import parse_response
 
@@ -24,10 +31,12 @@ class MultiFormatAPITable(APIResource):
 
     def list(
         self,
-        conditions: Optional[List[FilterCondition]] = None,
-        limit: Optional[int] = None,
-        **kwargs
-    ) -> pd.DataFrame:
+        conditions: List[FilterCondition] = None,
+        limit: int = None,
+        sort: List[SortColumn] = None,
+        targets: List[str] = None,
+        **kwargs,
+    ):
         """
         Fetch data from URL and parse according to detected format.
 

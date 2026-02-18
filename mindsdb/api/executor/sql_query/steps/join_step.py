@@ -57,51 +57,73 @@ class JoinStepCall(BaseStepCall):
                     join_type = 'left join'
                 elif right_data.is_prediction:
                     join_type = 'right join'
+            table_a, names_a = left_data.to_df_cols(prefix='A')
+            table_b, names_b = right_data.to_df_cols(prefix='B')
+
+            query = f"""
+                SELECT * FROM table_a {join_type} table_b
+                ON {join_condition}
+            """
+            resp_df, _description = query_df_with_type_infer_fallback(query, {
+                'table_a': table_a,
+                'table_b': table_b
+            })
         else:
-            def adapt_condition(node, **kwargs):
-                if not isinstance(node, Identifier) or len(node.parts) != 2:
-                    return
+            # Register DataFrames with DuckDB using the original table aliases
+            # so DuckDB resolves column references in ON conditions natively,
+            # including functions like LOWER(), SPLIT_PART(), etc.
+            left_alias = left_data.columns[0].table_alias if left_data.columns else 'table_a'
+            right_alias = right_data.columns[0].table_alias if right_data.columns else 'table_b'
+            if left_alias == right_alias:
+                right_alias = f'{right_alias}_r'
 
-                table_alias, alias = node.parts
-                cols = left_data.find_columns(alias, table_alias)
-                if len(cols) == 1:
-                    col_name = cols[0].get_hash_name(prefix='A')
-                    return Identifier(parts=['table_a', col_name])
+            left_df = left_data.to_df()
+            right_df = right_data.to_df()
 
-                cols = right_data.find_columns(alias, table_alias)
-                if len(cols) == 1:
-                    col_name = cols[0].get_hash_name(prefix='B')
-                    return Identifier(parts=['table_b', col_name])
+            # Build SELECT with hash-named aliases to avoid column name collisions
+            names_a = {}
+            select_parts = []
+            for col in left_data.columns:
+                hash_name = col.get_hash_name('A')
+                names_a[hash_name] = col
+                select_parts.append(f'"{left_alias}"."{col.alias}" AS "{hash_name}"')
+
+            names_b = {}
+            for col in right_data.columns:
+                hash_name = col.get_hash_name('B')
+                names_b[hash_name] = col
+                select_parts.append(f'"{right_alias}"."{col.alias}" AS "{hash_name}"')
 
             if step.query.condition is None:
-                # prevent memory overflow
                 if len(left_data) * len(right_data) < 10 ** 7:
                     step.query.condition = BinaryOperation(op='=', args=[Constant(0), Constant(0)])
                 else:
-                    raise NotSupportedYet('Unable to join table without condition')
+                    raise NotSupportedYet(
+                        'Unable to join tables without a condition: the resulting cross join '
+                        f'would produce {len(left_data) * len(right_data):,} rows '
+                        f'({len(left_data):,} x {len(right_data):,}), exceeding the 10,000,000 row limit.\n'
+                        'Hint: Add an ON clause, e.g.: SELECT * FROM t1 JOIN t2 ON t1.id = t2.id'
+                    )
 
             condition = copy.deepcopy(step.query.condition)
-            query_traversal(condition, adapt_condition)
-
             join_condition = SqlalchemyRender('postgres').get_string(condition)
             join_type = step.query.join_type
 
-        table_a, names_a = left_data.to_df_cols(prefix='A')
-        table_b, names_b = right_data.to_df_cols(prefix='B')
-
-        query = f"""
-            SELECT * FROM table_a {join_type} table_b
-            ON {join_condition}
-        """
-        resp_df, _description = query_df_with_type_infer_fallback(query, {
-            'table_a': table_a,
-            'table_b': table_b
-        })
+            select_clause = ', '.join(select_parts)
+            query = f"""
+                SELECT {select_clause}
+                FROM "{left_alias}" {join_type} "{right_alias}"
+                ON {join_condition}
+            """
+            resp_df, _description = query_df_with_type_infer_fallback(query, {
+                left_alias: left_df,
+                right_alias: right_df,
+            })
 
         resp_df.replace({np.nan: None}, inplace=True)
 
         names_a.update(names_b)
-        data = ResultSet.from_df_cols(df=resp_df, columns_dict=names_a)
+        data = ResultSet.from_df_cols(df=resp_df, columns_dict=names_a, strict=False)
 
         for col in data.find_columns('__mindsdb_row_id'):
             data.del_column(col)

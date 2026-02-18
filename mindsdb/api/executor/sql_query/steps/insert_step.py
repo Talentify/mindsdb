@@ -33,7 +33,10 @@ class InsertToTableCall(BaseStepCall):
         dn = self.session.datahub.get(integration_name)
 
         if hasattr(dn, "create_table") is False:
-            raise NotSupportedYet(f"Creating table in '{integration_name}' is not supported")
+            raise NotSupportedYet(
+                f"Creating table in '{integration_name}' is not supported.\n"
+                "Hint: Create the table directly in your database, then query it through MindsDB."
+            )
 
         if step.dataframe is not None:
             data = self.steps_data[step.dataframe.step_num]

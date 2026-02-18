@@ -157,7 +157,27 @@ def parse_xml(content: str) -> pd.DataFrame:
             # Empty XML or no parseable structure
             return pd.DataFrame({'root_tag': [root.tag], 'content': [root.text or '']})
 
-        return pd.DataFrame(records)
+        # Use json_normalize to flatten nested dicts into underscore-separated
+        # column names (e.g. author_name). Then ensure all values are scalars
+        # so DuckDB receives VARCHAR-compatible types, not VARCHAR[].
+        df = pd.json_normalize(records, sep='_')
+        df = _ensure_scalar_columns(df)
+
+        # Final cleanup: ensure no HTML tags remain in any string columns
+        # This is a defensive measure in case HTML tags were not caught during parsing
+        cleaned_count = 0
+        for col in df.columns:
+            if df[col].dtype == 'object':  # String/object columns
+                # Only clean values that contain '<' (potential HTML)
+                html_mask = df[col].apply(lambda x: pd.notna(x) and isinstance(x, str) and '<' in x)
+                if html_mask.any():
+                    df.loc[html_mask, col] = df.loc[html_mask, col].apply(lambda x: _clean_cdata_content(str(x)))
+                    cleaned_count += html_mask.sum()
+
+        if cleaned_count > 0:
+            logger.info(f"Cleaned HTML tags from {cleaned_count} values during DataFrame post-processing")
+
+        return df
 
     except ET.ParseError as e:
         logger.error(f"XML parsing error: {e}")
@@ -204,8 +224,19 @@ def _clean_cdata_content(text: str) -> Union[str, pd.Timestamp]:
     # Strip leading/trailing whitespace (common in CDATA sections)
     text = text.strip()
 
-    # Remove HTML tags (e.g., <a href="...">URL</a> -> URL)
-    text = re.sub(r'<[^>]+>', '', text)
+    # Extract URL from anchor tag href if present
+    # Matches: <a href="URL" ...>...</a> or <a ...href="URL"...>
+    href_match = re.search(r'<a\s+[^>]*href=["\']([^"\']+)["\'][^>]*>', text, re.IGNORECASE)
+    if href_match:
+        logger.debug(f"Extracting URL from anchor tag: {text[:100]}...")
+        text = href_match.group(1)  # Extract just the URL from href attribute
+
+    # Remove HTML tags (multiple passes for nested tags)
+    # Loop until no more tags are found
+    prev_text = None
+    while prev_text != text:
+        prev_text = text
+        text = re.sub(r'<[^>]+>', '', text)
 
     # Decode HTML entities (e.g., &amp; -> &, &lt; -> <)
     text = unescape(text)
@@ -215,6 +246,53 @@ def _clean_cdata_content(text: str) -> Union[str, pd.Timestamp]:
 
     # Try to parse as date
     return _try_parse_date(text)
+
+
+def _serialize_non_scalar(value: Any) -> Any:
+    """
+    Convert non-scalar values (lists, dicts) to string representations
+    suitable for flat DataFrame columns compatible with DuckDB.
+
+    Args:
+        value: Any cell value
+
+    Returns:
+        Scalar value (string, number, timestamp, or None)
+    """
+    if value is None or isinstance(value, (str, int, float, bool, pd.Timestamp)):
+        return value
+    if isinstance(value, list):
+        if len(value) == 0:
+            return ''
+        if all(isinstance(item, (str, int, float)) for item in value):
+            return ', '.join(str(item) for item in value)
+        return json.dumps(value, ensure_ascii=False, default=str)
+    if isinstance(value, dict):
+        return json.dumps(value, ensure_ascii=False, default=str)
+    return str(value)
+
+
+def _ensure_scalar_columns(df: pd.DataFrame) -> pd.DataFrame:
+    """
+    Ensure all DataFrame columns contain only scalar values.
+    Converts any remaining list or dict values to strings so that
+    DuckDB receives only VARCHAR-compatible types.
+
+    Args:
+        df: DataFrame that may contain non-scalar cell values
+
+    Returns:
+        DataFrame with all scalar values
+    """
+    for col in df.columns:
+        if df[col].dtype == 'object':
+            has_non_scalar = df[col].apply(
+                lambda x: isinstance(x, (list, dict))
+            ).any()
+            if has_non_scalar:
+                logger.debug(f"Converting non-scalar values in column '{col}' to strings")
+                df[col] = df[col].apply(_serialize_non_scalar)
+    return df
 
 
 def _xml_element_to_dict(element: ET.Element) -> Dict[str, Any]:
