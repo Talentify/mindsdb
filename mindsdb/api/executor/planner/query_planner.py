@@ -892,6 +892,7 @@ class QueryPlanner:
 
         if query.cte is not None:
             self.plan_cte(query)
+            query.cte = None  # CTEs have been decomposed into steps; clear so DuckDB doesn't re-execute them
 
         from_table = query.from_table
 

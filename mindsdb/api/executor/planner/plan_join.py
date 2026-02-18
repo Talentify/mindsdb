@@ -437,10 +437,15 @@ class PlanJoinTablesQuery:
         if referenced_cols:
             filter_col_names = set()
             for cond in conditions:
-                if isinstance(cond, BinaryOperation):
-                    for arg in cond.args:
+                if isinstance(cond, BinaryOperation) and len(cond.args) >= 2:
+                    # Only exclude columns that are scalar filter parameters (col = Constant).
+                    # Do NOT exclude columns used in cross-table JOIN predicates
+                    # (col IN (Parameter)), as those columns must still be fetched.
+                    for i, arg in enumerate(cond.args[:2]):
                         if isinstance(arg, Identifier):
-                            filter_col_names.add(arg.parts[-1])
+                            other = cond.args[1 - i]
+                            if isinstance(other, Constant):
+                                filter_col_names.add(arg.parts[-1])
             fetch_cols = referenced_cols - filter_col_names
             targets = [Identifier(parts=[col]) for col in fetch_cols] if fetch_cols else [Star()]
         else:

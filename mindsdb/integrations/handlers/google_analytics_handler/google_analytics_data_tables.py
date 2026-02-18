@@ -30,6 +30,37 @@ from mindsdb.utilities import log
 logger = log.getLogger(__name__)
 
 
+def _collect_identifiers(node) -> List[str]:
+    """Recursively collect all Identifier column names from an AST node.
+
+    Walks into CASE WHEN, Function args, BinaryOperation, etc. so that
+    columns referenced inside complex expressions are not missed.
+    """
+    if node is None:
+        return []
+    if isinstance(node, ast.Identifier):
+        return [str(node.parts[-1])]
+    if isinstance(node, ast.Case):
+        names = []
+        for condition, result in node.rules:
+            names.extend(_collect_identifiers(condition))
+            names.extend(_collect_identifiers(result))
+        names.extend(_collect_identifiers(node.default))
+        return names
+    if isinstance(node, ast.Function):
+        names = []
+        for arg in (node.args or []):
+            names.extend(_collect_identifiers(arg))
+        return names
+    if isinstance(node, ast.BinaryOperation):
+        return _collect_identifiers(node.args[0]) + _collect_identifiers(node.args[1])
+    if isinstance(node, ast.UnaryOperation):
+        return _collect_identifiers(node.args[0])
+    if isinstance(node, ast.TypeCast):
+        return _collect_identifiers(node.arg)
+    return []
+
+
 class ReportsTable(APITable):
     """
     Table for running standard Google Analytics reports using the Data API.
@@ -94,27 +125,29 @@ class ReportsTable(APITable):
                     else:
                         dimension_filters[api_name] = (op, val)
 
-            # Extract dimensions and metrics from SELECT columns
+            # Extract dimensions and metrics from SELECT columns.
+            # Use _collect_identifiers to recurse into CASE WHEN, SUM(...), and other
+            # complex expressions so that all referenced columns are fetched from GA4.
             dimensions = []
             metrics = []
 
             if query.targets:
-                for target in query.targets:
-                    if isinstance(target, ast.Star):
-                        # If SELECT *, use default dimensions and metrics
-                        dimensions = [Dimension(name='date'), Dimension(name='country')]
-                        metrics = [Metric(name='activeUsers'), Metric(name='sessions')]
-                        break
-                    elif isinstance(target, ast.Identifier):
-                        col_name = str(target.parts[-1])
-                        # Convert underscores back to colons for custom dimensions (reverse sanitization)
-                        # customEvent_job_title -> customEvent:job_title
-                        api_name = self._unsanitize_column_name(col_name)
-                        # Determine if it's a dimension or metric based on common patterns
-                        if self._is_metric(col_name):
-                            metrics.append(Metric(name=api_name))
-                        else:
-                            dimensions.append(Dimension(name=api_name))
+                has_star = any(isinstance(t, ast.Star) for t in query.targets)
+                if has_star:
+                    dimensions = [Dimension(name='date'), Dimension(name='country')]
+                    metrics = [Metric(name='activeUsers'), Metric(name='sessions')]
+                else:
+                    seen = set()
+                    for target in query.targets:
+                        for col_name in _collect_identifiers(target):
+                            if col_name in seen:
+                                continue
+                            seen.add(col_name)
+                            api_name = self._unsanitize_column_name(col_name)
+                            if self._is_metric(col_name):
+                                metrics.append(Metric(name=api_name))
+                            else:
+                                dimensions.append(Dimension(name=api_name))
 
             # If no dimensions/metrics specified, use defaults
             if not dimensions:
