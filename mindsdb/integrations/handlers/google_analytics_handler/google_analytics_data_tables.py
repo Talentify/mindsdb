@@ -93,8 +93,10 @@ class ReportsTable(APITable):
             pandas DataFrame containing the report data
         """
         try:
-            # Extract conditions from WHERE clause
-            conditions = extract_comparison_conditions(query.where) if query.where else []
+            # Extract conditions from WHERE clause.
+            # ignore_functions=True unwraps LOWER(col)/UPPER(col) so callers can
+            # write WHERE LOWER(sessionSourceMedium) = 'google / organic'.
+            conditions = extract_comparison_conditions(query.where, ignore_functions=True) if query.where else []
 
             # Extract required date range and filters
             start_date = '30daysAgo'
@@ -500,8 +502,10 @@ class RealtimeReportsTable(APITable):
             pandas DataFrame containing the realtime report data
         """
         try:
-            # Extract conditions from WHERE clause
-            conditions = extract_comparison_conditions(query.where) if query.where else []
+            # Extract conditions from WHERE clause.
+            # ignore_functions=True unwraps LOWER(col)/UPPER(col) so callers can
+            # write WHERE LOWER(sessionSourceMedium) = 'google / organic'.
+            conditions = extract_comparison_conditions(query.where, ignore_functions=True) if query.where else []
 
             # Extract dimension filters
             dimension_filters = {}
@@ -857,8 +861,10 @@ class MetadataTable(APITable):
             pandas DataFrame containing the metadata
         """
         try:
-            # Extract conditions from WHERE clause
-            conditions = extract_comparison_conditions(query.where) if query.where else []
+            # Extract conditions from WHERE clause.
+            # ignore_functions=True unwraps LOWER(col)/UPPER(col) so callers can
+            # write WHERE LOWER(sessionSourceMedium) = 'google / organic'.
+            conditions = extract_comparison_conditions(query.where, ignore_functions=True) if query.where else []
 
             # Extract filter type if specified
             filter_type = None
