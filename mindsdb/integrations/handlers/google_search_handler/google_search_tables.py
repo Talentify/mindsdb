@@ -129,7 +129,11 @@ class SearchAnalyticsTable(APITable):
             elif isinstance(target, ast.Identifier):
                 selected_columns.append(target.parts[-1])
             else:
-                raise ValueError(f"Unknown query target {type(target)}")
+                # Complex expression — return all raw columns for DuckDB to process.
+                selected_columns = self.get_columns(dimensions)
+                break
+        if not selected_columns:
+            selected_columns = self.get_columns(dimensions)
         if len(traffic_data) == 0:
             traffic_data = pd.DataFrame([], columns=selected_columns)
         else:
@@ -307,7 +311,11 @@ class SiteMapsTable(APITable):
             elif isinstance(target, ast.Identifier):
                 selected_columns.append(target.parts[-1])
             else:
-                raise ValueError(f"Unknown query target {type(target)}")
+                # Complex expression — return all raw columns for DuckDB to process.
+                selected_columns = self.get_columns()
+                break
+        if not selected_columns:
+            selected_columns = self.get_columns()
 
         if len(sitemaps) == 0:
             sitemaps = pd.DataFrame([], columns=selected_columns)
@@ -432,7 +440,11 @@ class UrlInspectionTable(APITable):
             elif isinstance(target, ast.Identifier):
                 selected_columns.append(target.parts[-1])
             else:
-                raise ValueError(f"Unknown query target {type(target)}")
+                # Complex expression — return all raw columns for DuckDB to process.
+                selected_columns = self.get_columns()
+                break
+        if not selected_columns:
+            selected_columns = self.get_columns()
 
         if len(inspection_data) == 0:
             inspection_data = pd.DataFrame([], columns=selected_columns)

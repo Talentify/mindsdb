@@ -97,7 +97,12 @@ class GoogleCalendarEventsTable(APITable):
             elif isinstance(target, ast.Identifier):
                 selected_columns.append(target.parts[-1])
             else:
-                raise ValueError(f"Unknown query target {type(target)}")
+                # Complex expression (CASE WHEN, SUM, etc.) — the outer DuckDB
+                # layer handles the computation; return all raw columns so it can.
+                selected_columns = self.get_columns()
+                break
+        if not selected_columns:
+            selected_columns = self.get_columns()
 
         if len(events) == 0:
             events = pd.DataFrame([], columns=selected_columns)
@@ -371,6 +376,12 @@ class GoogleCalendarListTable(APITable):
                 break
             elif isinstance(target, ast.Identifier):
                 selected_columns.append(target.parts[-1])
+            else:
+                # Complex expression — return all raw columns for DuckDB to process.
+                selected_columns = self.get_columns()
+                break
+        if not selected_columns:
+            selected_columns = self.get_columns()
 
         # Call handler method
         calendars = self.handler.call_application_api(
@@ -469,6 +480,12 @@ class GoogleCalendarFreeBusyTable(APITable):
                 break
             elif isinstance(target, ast.Identifier):
                 selected_columns.append(target.parts[-1])
+            else:
+                # Complex expression — return all raw columns for DuckDB to process.
+                selected_columns = self.get_columns()
+                break
+        if not selected_columns:
+            selected_columns = self.get_columns()
 
         # Call handler method
         busy_times = self.handler.call_application_api(
