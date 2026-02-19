@@ -10,6 +10,7 @@ from mindsdb_sql_parser.ast import (
     Function,
     Variable,
     BinaryOperation,
+    BetweenOperation,
 )
 
 from mindsdb.api.mysql.mysql_proxy.libs.constants.mysql import SERVER_VARIABLES
@@ -23,6 +24,69 @@ from mindsdb.interfaces.query_context.context_controller import query_context_co
 
 from .base import BaseStepCall
 from .fetch_dataframe import get_fill_param_fnc
+
+
+def _strip_where_absent_columns(where_node, df_columns_lower):
+    """Remove AND-branches from WHERE that reference columns not in the DataFrame.
+
+    API handlers consume certain WHERE params (e.g. start_date, end_date, url)
+    that do not appear as DataFrame columns. When the SubSelectStep forwards
+    WHERE to DuckDB, those conditions would cause BinderError. This function
+    walks the AND tree and strips any branch whose Identifier columns are not
+    present in the DataFrame.
+
+    For OR subtrees: if any column reference is absent the entire OR is dropped
+    (we cannot partially remove OR branches without changing semantics).
+
+    Args:
+        where_node: AST node representing the WHERE clause.
+        df_columns_lower: set of lowercase DataFrame column names.
+
+    Returns:
+        The pruned WHERE node, or None if everything was stripped.
+    """
+    if where_node is None:
+        return None
+
+    def _has_absent_column(node):
+        """True if *node* references any column not in the DataFrame."""
+        found = [False]
+
+        def _check(n, **kwargs):
+            if isinstance(n, Identifier) and not kwargs.get('is_table'):
+                if n.parts[-1].lower() not in df_columns_lower:
+                    found[0] = True
+
+        query_traversal(node, _check)
+        return found[0]
+
+    if isinstance(where_node, BinaryOperation):
+        op = where_node.op.lower()
+
+        if op == 'and':
+            left = _strip_where_absent_columns(where_node.args[0], df_columns_lower)
+            right = _strip_where_absent_columns(where_node.args[1], df_columns_lower)
+            if left is None and right is None:
+                return None
+            if left is None:
+                return right
+            if right is None:
+                return left
+            where_node.args = [left, right]
+            return where_node
+
+        # For non-AND ops (OR, =, <, >, LIKE, IS, etc.): if any column is
+        # absent, strip the entire subtree.
+        if _has_absent_column(where_node):
+            return None
+        return where_node
+
+    if isinstance(where_node, BetweenOperation):
+        if _has_absent_column(where_node):
+            return None
+        return where_node
+
+    return where_node
 
 
 class SubSelectStepCall(BaseStepCall):
@@ -64,6 +128,14 @@ class SubSelectStepCall(BaseStepCall):
             query_traversal(query, fill_params)
 
         df = result.to_df()
+
+        # Strip WHERE conditions that reference columns not in the DataFrame.
+        # API handlers consume params like start_date, end_date, url from WHERE
+        # but don't return them as DataFrame columns. DuckDB would fail on them.
+        if isinstance(query, Select) and query.where is not None:
+            df_cols_lower = {c.lower() for c in df.columns}
+            query.where = _strip_where_absent_columns(query.where, df_cols_lower)
+
         res = query_df(df, query, session=self.session)
 
         # get database from first column

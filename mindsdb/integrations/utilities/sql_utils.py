@@ -99,7 +99,7 @@ def conditions_to_filter(binary_op: ASTNode):
 
 def extract_comparison_conditions(binary_op: ASTNode, ignore_functions=False):
     """Extracts all simple comparison conditions that must be true from an AST node.
-    Does NOT support 'or' conditions.
+    OR subtrees are silently skipped (not extracted, not errored).
     """
     conditions = []
 
@@ -109,6 +109,11 @@ def extract_comparison_conditions(binary_op: ASTNode, ignore_functions=False):
             if op == "and":
                 # Want to separate individual conditions, not include 'and' as its own condition.
                 return
+            if op == "or":
+                # OR conditions cannot be decomposed into simple AND conditions.
+                # Return the node itself (non-None) so query_traversal skips
+                # the entire OR subtree without recursing into children.
+                return node
 
             arg1, arg2 = node.args
             if ignore_functions and isinstance(arg1, ast.Function):
