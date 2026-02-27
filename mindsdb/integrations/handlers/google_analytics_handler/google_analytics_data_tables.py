@@ -191,6 +191,19 @@ class ReportsTable(APITable):
             if order_bys:
                 request.order_bys = order_bys
 
+            logger.info(
+                "[TEMP DEBUG][google_analytics] run_report integration=%s property_id=%s dimensions=%s metrics=%s "
+                "start_date=%s end_date=%s limit=%s offset=%s",
+                getattr(self.handler, "name", None),
+                self.handler.property_id,
+                [d.name for d in dimensions],
+                [m.name for m in metrics],
+                start_date,
+                end_date,
+                limit,
+                offset,
+            )
+
             # Execute the request
             self.handler.connect()
             response = self.handler.data_service.run_report(request)
@@ -577,6 +590,16 @@ class RealtimeReportsTable(APITable):
                 request.dimension_filter = dimension_filter
             if metric_filter:
                 request.metric_filter = metric_filter
+
+            logger.info(
+                "[TEMP DEBUG][google_analytics] run_realtime_report integration=%s property_id=%s dimensions=%s "
+                "metrics=%s limit=%s",
+                getattr(self.handler, "name", None),
+                self.handler.property_id,
+                [d.name for d in dimensions],
+                [m.name for m in metrics],
+                limit,
+            )
 
             # Execute the request
             self.handler.connect()
