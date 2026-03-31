@@ -5,11 +5,14 @@ from unittest.mock import Mock
 import pandas as pd
 from mindsdb_sql_parser import parse_sql
 
-from mindsdb.integrations.handlers.sentry_handler.sentry_client import SentryClient
-from mindsdb.integrations.handlers.sentry_handler.sentry_tables import (
+from mindsdb.integrations.handlers.sentry_handler import sentry_tables
+from mindsdb.integrations.handlers.sentry_handler.issue_sentry_handler import IssueSentryHandler
+from mindsdb.integrations.handlers.sentry_handler.issue_sentry_tables import (
     SentryIssuesTable,
     SentryProjectsTable,
 )
+from mindsdb.integrations.handlers.sentry_handler.sentry_client import SentryClient
+from mindsdb.integrations.handlers.sentry_handler.sentry_handler import SentryHandler
 from mindsdb.integrations.utilities.sql_utils import (
     FilterCondition,
     FilterOperator,
@@ -98,6 +101,19 @@ class SentryClientTest(unittest.TestCase):
 
         self.assertEqual([{"id": "2", "slug": "mktplace"}], projects)
         self.assertEqual(2, len(session.calls))
+
+
+class SentryHandlerCompatibilityTest(unittest.TestCase):
+    def test_public_handler_entrypoint_inherits_issue_handler(self):
+        handler = SentryHandler("sentry", {})
+
+        self.assertIsInstance(handler, IssueSentryHandler)
+        self.assertIn("projects", handler._tables)
+        self.assertIn("issues", handler._tables)
+
+    def test_legacy_tables_module_reexports_issue_tables(self):
+        self.assertIs(sentry_tables.SentryProjectsTable, SentryProjectsTable)
+        self.assertIs(sentry_tables.SentryIssuesTable, SentryIssuesTable)
 
 
 class SentryTablesTest(unittest.TestCase):
