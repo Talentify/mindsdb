@@ -1,10 +1,10 @@
-from mindsdb.integrations.handlers.sentry_handler.issue_sentry_tables import (
-    SentryIssuesTable,
-    SentryProjectsTable,
-)
 from mindsdb.integrations.handlers.sentry_handler.explore_sentry_tables import (
     SentryLogsTable,
     SentryLogsTimeseriesTable,
+)
+from mindsdb.integrations.handlers.sentry_handler.issue_sentry_tables import (
+    SentryIssuesTable,
+    SentryProjectsTable,
 )
 
 

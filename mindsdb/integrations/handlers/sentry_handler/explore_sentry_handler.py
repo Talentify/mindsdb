@@ -23,7 +23,7 @@ class ExploreSentryHandler(APIHandler):
         super().__init__(name)
         self.connection_data = connection_data or {}
         self.issue_handler = issue_handler
-        self.environment = self.connection_data.get("environment")
+        self.environment = self.connection_data["environment"]
         self.connection: ExploreClient | None = None
         self.is_connected = False
         self.thread_safe = True

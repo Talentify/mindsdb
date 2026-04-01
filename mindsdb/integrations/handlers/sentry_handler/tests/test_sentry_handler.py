@@ -1,7 +1,7 @@
+import json
 import unittest
 from datetime import date
-import json
-from unittest.mock import Mock
+from unittest.mock import Mock, patch
 
 import pandas as pd
 from mindsdb_sql_parser import parse_sql
@@ -28,9 +28,12 @@ from mindsdb.integrations.handlers.sentry_handler.issue_sentry_tables import (
     SentryIssuesTable,
     SentryProjectsTable,
 )
-from mindsdb.integrations.handlers.sentry_handler.sql_to_explore import build_logs_request
-from mindsdb.integrations.handlers.sentry_handler.sentry_client import SentryClient
+from mindsdb.integrations.handlers.sentry_handler.sentry_client import (
+    SentryClient,
+    SentryRequestError,
+)
 from mindsdb.integrations.handlers.sentry_handler.sentry_handler import SentryHandler
+from mindsdb.integrations.handlers.sentry_handler.sql_to_explore import build_logs_request
 from mindsdb.integrations.utilities.sql_utils import (
     FilterCondition,
     FilterOperator,
@@ -91,6 +94,7 @@ class SentryClientTest(unittest.TestCase):
             auth_token="token",
             organization_slug="talentify",
             project_slug="mktplace",
+            environment="production",
             session=session,
             sleep=lambda _: None,
         )
@@ -111,6 +115,7 @@ class SentryClientTest(unittest.TestCase):
             auth_token="token",
             organization_slug="talentify",
             project_slug="mktplace",
+            environment="production",
             session=session,
             sleep=lambda _: None,
         )
@@ -131,6 +136,7 @@ class SentryClientTest(unittest.TestCase):
             auth_token="token",
             organization_slug="talentify",
             project_slug="mktplace",
+            environment="production",
             session=session,
             sleep=lambda _: None,
         )
@@ -145,10 +151,92 @@ class SentryClientTest(unittest.TestCase):
         self.assertEqual({"data": [{"message": "ok"}]}, payload)
         self.assertEqual(2, len(session.calls))
 
+    def test_list_issues_prepends_environment_query_fragment(self):
+        session = MockSession([MockResponse(200, [])])
+        client = SentryClient(
+            auth_token="token",
+            organization_slug="talentify",
+            project_slug="mktplace",
+            environment="production",
+            session=session,
+            sleep=lambda _: None,
+        )
+
+        client.list_issues(project_id=99, query="status:unresolved level:error", limit=1)
+
+        self.assertEqual(
+            'environment:"production" status:unresolved level:error',
+            session.calls[0]["params"]["query"],
+        )
+
+    def test_list_issues_uses_environment_query_when_query_is_empty(self):
+        session = MockSession([MockResponse(200, [])])
+        client = SentryClient(
+            auth_token="token",
+            organization_slug="talentify",
+            project_slug="mktplace",
+            environment="production",
+            session=session,
+            sleep=lambda _: None,
+        )
+
+        client.list_issues(project_id=99, query="", limit=1)
+
+        self.assertEqual('environment:"production"', session.calls[0]["params"]["query"])
+
+
+class SentryHandlerTest(unittest.TestCase):
+    def test_validate_connection_requires_environment(self):
+        handler = SentryHandler(
+            "sentry",
+            {
+                "auth_token": "token",
+                "organization_slug": "talentify",
+                "project_slug": "mktplace",
+            },
+        )
+
+        with self.assertRaisesRegex(ValueError, "environment"):
+            handler._validate_connection_data()
+
+    def test_connect_passes_environment_to_client(self):
+        handler = SentryHandler(
+            "sentry",
+            {
+                "auth_token": "token",
+                "organization_slug": "talentify",
+                "project_slug": "mktplace",
+                "environment": "production",
+            },
+        )
+
+        with patch("mindsdb.integrations.handlers.sentry_handler.issue_sentry_handler.SentryClient") as client_cls:
+            client = client_cls.return_value
+            client.validate_connection.return_value = {"id": 99}
+
+            handler.connect()
+
+        client_cls.assert_called_once_with(
+            auth_token="token",
+            organization_slug="talentify",
+            project_slug="mktplace",
+            environment="production",
+            base_url="https://sentry.io",
+        )
+        client.validate_connection.assert_called_once_with()
+
 
 class SentryHandlerCompatibilityTest(unittest.TestCase):
     def test_public_handler_entrypoint_inherits_issue_handler(self):
-        handler = SentryHandler("sentry", {})
+        handler = SentryHandler(
+            "sentry",
+            {
+                "auth_token": "token",
+                "organization_slug": "talentify",
+                "project_slug": "mktplace",
+                "environment": "production",
+            },
+        )
 
         self.assertIsInstance(handler, IssueSentryHandler)
         self.assertIn("projects", handler._tables)
@@ -156,7 +244,7 @@ class SentryHandlerCompatibilityTest(unittest.TestCase):
         self.assertIn("logs", handler._tables)
         self.assertIn("logs_timeseries", handler._tables)
 
-    def test_legacy_tables_module_reexports_issue_tables(self):
+    def test_legacy_tables_module_reexports_issue_and_explore_tables(self):
         self.assertIs(sentry_tables.SentryProjectsTable, SentryProjectsTable)
         self.assertIs(sentry_tables.SentryIssuesTable, SentryIssuesTable)
         self.assertIs(sentry_tables.SentryLogsTable, SentryLogsTable)
@@ -205,7 +293,6 @@ class SentryTablesTest(unittest.TestCase):
                 "culprit": "checkout.views.create_order",
                 "status": "unresolved",
                 "level": "error",
-                "environments": ["production"],
                 "count": "12",
                 "userCount": "7",
                 "firstSeen": "2026-03-17T10:00:00Z",
@@ -222,7 +309,7 @@ class SentryTablesTest(unittest.TestCase):
         self.assertTrue(conditions[0].applied)
         self.assertEqual("Checkout failed", df.iloc[0]["title"])
         self.assertEqual(12, df.iloc[0]["count"])
-        self.assertEqual("production", df.iloc[0]["environment"])
+        self.assertNotIn("environment", df.columns)
 
     def test_issues_table_rejects_query_and_structured_filters_together(self):
         table = SentryIssuesTable(HandlerStub(Mock()))
@@ -281,6 +368,13 @@ class SentryTablesTest(unittest.TestCase):
         self.assertEqual(["Today issue"], list(df["title"]))
         self.assertTrue(conditions[0].applied)
         self.assertTrue(conditions[1].applied)
+
+    def test_extract_comparison_conditions_supports_current_date_and_date_literal(self):
+        current_date_where = parse_sql("SELECT * FROM issues WHERE last_seen::DATE = CURRENT_DATE").where
+        literal_date_where = parse_sql("SELECT * FROM issues WHERE last_seen >= '2026-03-18'").where
+
+        self.assertEqual([["=", "last_seen", date.today().isoformat()]], extract_comparison_conditions(current_date_where))
+        self.assertEqual([[">=", "last_seen", "2026-03-18"]], extract_comparison_conditions(literal_date_where))
 
 
 class ExploreSentryTablesTest(unittest.TestCase):
@@ -360,10 +454,7 @@ class ExploreSentryTablesTest(unittest.TestCase):
                         "values": [
                             {"timestamp": 1710763200000, "value": 5, "incomplete": False},
                             {"timestamp": 1710849600000, "value": 7, "incomplete": False},
-                        ],
-                        "yAxis": "count()",
-                        "groupBy": [],
-                        "meta": {"interval": 86400},
+                        ]
                     }
                 ]
             },
@@ -392,13 +483,6 @@ class ExploreSentryTablesTest(unittest.TestCase):
         self.assertEqual(["production"], params["environment"])
         self.assertEqual(2, len(df))
         self.assertEqual(["bucket_start", "value"], list(df.columns))
-
-    def test_extract_comparison_conditions_supports_current_date_and_date_literal(self):
-        current_date_where = parse_sql("SELECT * FROM issues WHERE last_seen::DATE = CURRENT_DATE").where
-        literal_date_where = parse_sql("SELECT * FROM issues WHERE last_seen >= '2026-03-18'").where
-
-        self.assertEqual([["=", "last_seen", date.today().isoformat()]], extract_comparison_conditions(current_date_where))
-        self.assertEqual([[">=", "last_seen", "2026-03-18"]], extract_comparison_conditions(literal_date_where))
 
     def test_build_logs_request_translates_message_like_to_explore_search(self):
         conditions = [FilterCondition("message", FilterOperator.LIKE, "%token%")]

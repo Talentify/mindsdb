@@ -25,8 +25,8 @@ connection_args = OrderedDict(
     },
     environment={
         "type": ARG_TYPE.STR,
-        "description": "Optional Sentry environment filter used by Explore tables.",
-        "required": False,
+        "description": "Sentry environment name.",
+        "required": True,
         "label": "Environment",
     },
     base_url={

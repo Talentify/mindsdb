@@ -17,3 +17,16 @@ Internal organization:
 - `ExploreSentryHandler` owns the Explore-backed `logs` and `logs_timeseries` flow
 - `sentry_handler.py` remains the public compatibility entrypoint
 - this layout prepares the package for a future Explore-focused handler without mixing responsibilities
+
+Example connection:
+
+```sql
+CREATE DATABASE sentry_datasource
+WITH ENGINE = 'sentry',
+PARAMETERS = {
+  "auth_token": "sntrys_xxx",
+  "organization_slug": "talentify",
+  "project_slug": "mktplace",
+  "environment": "production"
+};
+```

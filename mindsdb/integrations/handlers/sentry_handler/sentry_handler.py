@@ -1,5 +1,5 @@
-from mindsdb.integrations.handlers.sentry_handler.issue_sentry_handler import IssueSentryHandler
 from mindsdb.integrations.handlers.sentry_handler.explore_sentry_handler import ExploreSentryHandler
+from mindsdb.integrations.handlers.sentry_handler.issue_sentry_handler import IssueSentryHandler
 
 
 class SentryHandler(IssueSentryHandler):
