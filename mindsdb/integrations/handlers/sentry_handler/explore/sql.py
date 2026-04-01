@@ -4,7 +4,7 @@ from datetime import datetime, timedelta, timezone
 
 import pandas as pd
 
-from mindsdb.integrations.handlers.sentry_handler.explore_models import (
+from mindsdb.integrations.handlers.sentry_handler.explore.models import (
     ExploreDataset,
     ExploreTableRequest,
     ExploreTimeseriesRequest,
@@ -129,29 +129,29 @@ def _resolve_window(
         if condition.column not in time_columns:
             continue
 
-        parsed_value = pd.to_datetime(condition.value, utc=True, errors="coerce")
-        if pd.isna(parsed_value):
+        timestamp = pd.to_datetime(condition.value, utc=True, errors="coerce")
+        if pd.isna(timestamp):
             raise ValueError(f"Unsupported where value for {condition.column}: {condition.value}")
 
-        condition.applied = True
-        value = parsed_value.to_pydatetime()
+        normalized_timestamp = timestamp.to_pydatetime()
 
-        if condition.op == FilterOperator.EQUAL:
-            if isinstance(condition.value, str) and len(condition.value) == 10:
-                start_value = _max_timestamp(start_value, value)
-                end_value = _min_timestamp(end_value, value + timedelta(days=1))
-            else:
-                start_value = _max_timestamp(start_value, value)
-                end_value = _min_timestamp(end_value, value)
-        elif condition.op in {FilterOperator.GREATER_THAN, FilterOperator.GREATER_THAN_OR_EQUAL}:
-            start_value = _max_timestamp(start_value, value)
-        elif condition.op in {FilterOperator.LESS_THAN, FilterOperator.LESS_THAN_OR_EQUAL}:
-            end_value = _min_timestamp(end_value, value)
-        else:
-            raise ValueError(f"Unsupported where operation for {condition.column}")
+        if condition.op in {FilterOperator.EQUAL, FilterOperator.GREATER_THAN_OR_EQUAL, FilterOperator.GREATER_THAN}:
+            if condition.op == FilterOperator.GREATER_THAN:
+                normalized_timestamp = normalized_timestamp + timedelta(microseconds=1)
+            start_value = _max_timestamp(start_value, normalized_timestamp)
+            condition.applied = True
+
+        if condition.op in {FilterOperator.EQUAL, FilterOperator.LESS_THAN_OR_EQUAL, FilterOperator.LESS_THAN}:
+            if condition.op == FilterOperator.LESS_THAN:
+                normalized_timestamp = normalized_timestamp - timedelta(microseconds=1)
+            end_value = _min_timestamp(end_value, normalized_timestamp)
+            condition.applied = True
 
     if start_value is None and end_value is None:
         return None, None, DEFAULT_STATS_PERIOD
+
+    if start_value and end_value and start_value > end_value:
+        raise ValueError("Invalid timestamp filter range for Sentry Explore request")
 
     return _isoformat(start_value), _isoformat(end_value), None
 

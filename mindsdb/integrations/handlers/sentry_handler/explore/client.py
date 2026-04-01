@@ -2,13 +2,13 @@ from __future__ import annotations
 
 from typing import Any
 
-from mindsdb.integrations.handlers.sentry_handler.explore_errors import (
+from mindsdb.integrations.handlers.sentry_handler.explore.errors import (
     ExploreAuthenticationError,
     ExploreCapabilityError,
     ExplorePermissionError,
     ExploreQueryError,
 )
-from mindsdb.integrations.handlers.sentry_handler.explore_models import (
+from mindsdb.integrations.handlers.sentry_handler.explore.models import (
     ExploreTableRequest,
     ExploreTimeseriesRequest,
 )

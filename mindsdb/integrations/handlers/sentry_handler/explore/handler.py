@@ -2,8 +2,8 @@ from __future__ import annotations
 
 from typing import Any
 
-from mindsdb.integrations.handlers.sentry_handler.explore_client import ExploreClient
-from mindsdb.integrations.handlers.sentry_handler.explore_sentry_tables import (
+from mindsdb.integrations.handlers.sentry_handler.explore.client import ExploreClient
+from mindsdb.integrations.handlers.sentry_handler.explore.tables import (
     SentryLogsTable,
     SentryLogsTimeseriesTable,
 )

@@ -13,10 +13,10 @@ V1 scope:
 
 Internal organization:
 
-- `IssueSentryHandler` owns the current `projects` and `issues` flow
-- `ExploreSentryHandler` owns the Explore-backed `logs` and `logs_timeseries` flow
+- `issue/` owns the current `projects` and `issues` flow
+- `explore/` owns the Explore-backed `logs` and `logs_timeseries` flow
+- `sentry_client.py` and `connection_args.py` stay at the package root as shared/common pieces
 - `sentry_handler.py` remains the public compatibility entrypoint
-- this layout prepares the package for a future Explore-focused handler without mixing responsibilities
 
 Example connection:
 

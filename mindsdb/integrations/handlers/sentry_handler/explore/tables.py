@@ -5,7 +5,7 @@ from typing import Any
 
 import pandas as pd
 
-from mindsdb.integrations.handlers.sentry_handler.sql_to_explore import (
+from mindsdb.integrations.handlers.sentry_handler.explore.sql import (
     LOG_TABLE_COLUMNS,
     TIMESERIES_COLUMNS,
     build_logs_request,
@@ -86,7 +86,10 @@ class SentryLogsTable(APIResource):
             targets=targets,
         )
         rows = client.query_table(request)
-        flattened_rows = [self._flatten_row(row, project_slug=project.get("slug"), project_id=project.get("id")) for row in rows]
+        flattened_rows = [
+            self._flatten_row(row, project_slug=project.get("slug"), project_id=project.get("id"))
+            for row in rows
+        ]
         return pd.DataFrame(flattened_rows, columns=self.get_columns())
 
     def _flatten_row(self, row: dict[str, Any], *, project_slug: str | None, project_id: Any) -> dict[str, Any]:
@@ -134,7 +137,9 @@ class SentryLogsTimeseriesTable(APIResource):
             for value in item.get("values") or []:
                 rows.append(
                     {
-                        "bucket_start": _normalize_timestamp(pd.to_datetime(value.get("timestamp"), unit="ms", utc=True, errors="coerce")),
+                        "bucket_start": _normalize_timestamp(
+                            pd.to_datetime(value.get("timestamp"), unit="ms", utc=True, errors="coerce")
+                        ),
                         "value": value.get("value"),
                     }
                 )

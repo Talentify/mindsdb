@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from typing import Any
 
-from mindsdb.integrations.handlers.sentry_handler.issue_sentry_tables import (
+from mindsdb.integrations.handlers.sentry_handler.issue.tables import (
     SentryIssuesTable,
     SentryProjectsTable,
 )

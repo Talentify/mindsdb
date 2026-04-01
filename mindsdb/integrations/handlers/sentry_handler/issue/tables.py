@@ -116,7 +116,6 @@ class SentryIssuesTable(APIResource):
                     raise ValueError(f"Unsupported where operation for {condition.column}")
                 structured_filters.append(f"{condition.column}:{condition.value}")
                 condition.applied = True
-                continue
 
         if query_value is not None and structured_filters:
             raise ValueError("Sentry issues query filter cannot be combined with status or level filters")
