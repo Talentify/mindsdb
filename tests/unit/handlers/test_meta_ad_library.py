@@ -93,6 +93,36 @@ def test_check_connection_success(handler):
     session.get.assert_called_once()
 
 
+def test_check_connection_fails_when_no_search_scope():
+    """Meta API returns 400 when neither search_page_ids nor search_terms is provided."""
+    handler = MetaAdLibraryHandler(
+        "meta_ad_library",
+        connection_data={"access_token": "meta_token"},
+    )
+    session = MagicMock()
+    session.get.return_value = _build_json_response(
+        {
+            "error": {
+                "message": "A search_terms or search_page_ids parameter is required",
+                "type": "GraphMethodException",
+                "code": 100,
+            }
+        },
+        status_code=400,
+    )
+
+    with patch(
+        "mindsdb.integrations.handlers.meta_ad_library_handler.meta_ad_library_handler.requests.Session",
+        return_value=session,
+    ):
+        response = handler.check_connection()
+
+    assert isinstance(response, StatusResponse)
+    assert response.success is False
+    assert "search_terms or search_page_ids" in response.error_message
+    session.get.assert_called_once()
+
+
 def test_build_request_params_for_page_scope_does_not_send_search_type(handler):
     params = handler._build_request_params(conditions=[], limit=25)
 

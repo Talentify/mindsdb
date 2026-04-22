@@ -167,7 +167,8 @@ class MetaAdLibraryHandler(APIHandler):
         return any(not getattr(condition, "applied", False) for condition in conditions)
 
     def _request(self, params: dict[str, Any]) -> dict[str, Any]:
-        assert self.session is not None
+        if self.session is None:
+            raise RuntimeError("Handler is not connected. Call connect() first.")
         response = self.session.get(self.base_url, params=params, timeout=30)
         if response.ok:
             return response.json()
@@ -238,7 +239,7 @@ class MetaAdLibraryHandler(APIHandler):
                 continue
 
             values: list[date]
-            if condition.op in {FilterOperator.BETWEEN, FilterOperator.NOT_BETWEEN}:
+            if condition.op == FilterOperator.BETWEEN:
                 if not isinstance(condition.value, (list, tuple)) or len(condition.value) != 2:
                     continue
                 values = [self._coerce_date(condition.value[0]), self._coerce_date(condition.value[1])]
@@ -265,9 +266,7 @@ class MetaAdLibraryHandler(APIHandler):
     def _coerce_to_list(value: Any, fallback: list[str] | None = None) -> list[str]:
         if value is None:
             return list(fallback or [])
-        if isinstance(value, list):
-            return [str(item) for item in value]
-        if isinstance(value, tuple):
+        if isinstance(value, (list, tuple)):
             return [str(item) for item in value]
         if isinstance(value, str):
             stripped = value.strip()
