@@ -79,21 +79,23 @@ def parse_json(content: str) -> pd.DataFrame:
         if isinstance(data, list):
             if len(data) == 0:
                 return pd.DataFrame()
-            # List of objects
-            return pd.json_normalize(data)
+            df = pd.json_normalize(data)
         elif isinstance(data, dict):
             # Check if dict contains a list that should be the main data
             # Common patterns: {"data": [...], "results": [...], "items": [...]}
+            df = None
             for key in ['data', 'results', 'items', 'records', 'rows', 'entries']:
                 if key in data and isinstance(data[key], list):
                     logger.info(f"Extracting list from '{key}' field")
-                    return pd.json_normalize(data[key])
-
-            # Single object or nested structure
-            return pd.json_normalize(data)
+                    df = pd.json_normalize(data[key])
+                    break
+            if df is None:
+                df = pd.json_normalize(data)
         else:
             # Primitive type, wrap in DataFrame
             return pd.DataFrame({'value': [data]})
+
+        return _ensure_scalar_columns(df)
 
     except json.JSONDecodeError as e:
         logger.error(f"JSON parsing error: {e}")
@@ -274,24 +276,39 @@ def _serialize_non_scalar(value: Any) -> Any:
 
 def _ensure_scalar_columns(df: pd.DataFrame) -> pd.DataFrame:
     """
-    Ensure all DataFrame columns contain only scalar values.
-    Converts any remaining list or dict values to strings so that
-    DuckDB receives only VARCHAR-compatible types.
+    Ensure all DataFrame columns contain DuckDB-compatible values.
+
+    Two passes per object column:
+      1. Serialize any list/dict cells to strings.
+      2. If the column still mixes heterogeneous scalar types
+         (e.g. str + float), coerce every non-null cell to str so
+         DuckDB does not crash converting the dataframe to Arrow.
 
     Args:
-        df: DataFrame that may contain non-scalar cell values
+        df: DataFrame that may contain non-scalar or mixed-type cells
 
     Returns:
-        DataFrame with all scalar values
+        DataFrame with DuckDB-friendly columns
     """
     for col in df.columns:
-        if df[col].dtype == 'object':
-            has_non_scalar = df[col].apply(
-                lambda x: isinstance(x, (list, dict))
-            ).any()
-            if has_non_scalar:
-                logger.debug(f"Converting non-scalar values in column '{col}' to strings")
-                df[col] = df[col].apply(_serialize_non_scalar)
+        if df[col].dtype != 'object':
+            continue
+
+        has_non_scalar = df[col].apply(
+            lambda x: isinstance(x, (list, dict))
+        ).any()
+        if has_non_scalar:
+            logger.debug(f"Converting non-scalar values in column '{col}' to strings")
+            df[col] = df[col].apply(_serialize_non_scalar)
+
+        non_null = df[col].dropna()
+        if non_null.empty:
+            continue
+        type_set = {type(v) for v in non_null}
+        type_set.discard(type(None))
+        if len(type_set) > 1:
+            logger.debug(f"Coercing mixed-type column '{col}' to string ({type_set})")
+            df[col] = df[col].apply(lambda x: x if pd.isna(x) else str(x))
     return df
 
 
