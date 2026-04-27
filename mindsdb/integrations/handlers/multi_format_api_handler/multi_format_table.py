@@ -3,6 +3,7 @@ Multi-Format API Table implementation.
 Handles fetching and parsing data from web APIs/pages in multiple formats.
 """
 
+import json
 import requests
 import pandas as pd
 from typing import List, Optional
@@ -21,6 +22,22 @@ from mindsdb.integrations.utilities.sql_utils import (
 from .format_parsers import parse_response
 
 logger = logging.getLogger(__name__)
+
+
+def _coerce_dict_arg(value, arg_name: str) -> dict:
+    """Connection args declared as ARG_TYPE.DICT may arrive as JSON strings
+    from the MindsDB UI form. Coerce to dict; tolerate empty/invalid input."""
+    if isinstance(value, dict):
+        return value
+    if isinstance(value, str) and value.strip():
+        try:
+            parsed = json.loads(value)
+            if isinstance(parsed, dict):
+                return parsed
+            logger.warning(f"Connection arg '{arg_name}' is not a JSON object; ignoring.")
+        except json.JSONDecodeError:
+            logger.warning(f"Connection arg '{arg_name}' is not valid JSON; ignoring.")
+    return {}
 
 
 class MultiFormatAPITable(APIResource):
@@ -49,7 +66,6 @@ class MultiFormatAPITable(APIResource):
             pandas DataFrame with parsed data
         """
         # Extract URL from conditions
-        import json
         url = None
         headers = {}
         method = None
@@ -99,7 +115,7 @@ class MultiFormatAPITable(APIResource):
         # Fall back to connection-level method and body
         if not method:
             method = self.handler.connection_args.get('method', 'GET').upper()
-        connection_body = self.handler.connection_args.get('body', {})
+        connection_body = _coerce_dict_arg(self.handler.connection_args.get('body'), 'body')
         if connection_body:
             body = {**connection_body, **body}  # query-level keys override connection-level
 
@@ -118,7 +134,7 @@ class MultiFormatAPITable(APIResource):
 
         try:
             # Get default headers from connection args if available
-            connection_headers = self.handler.connection_args.get('headers', {})
+            connection_headers = _coerce_dict_arg(self.handler.connection_args.get('headers'), 'headers')
             if connection_headers:
                 headers = {**connection_headers, **headers}
 
