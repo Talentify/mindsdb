@@ -56,7 +56,7 @@ def handler():
         connection_data={
             "access_token": "meta_token",
             "search_page_ids": ["257702164651631"],
-            "ad_reached_countries": ["ALL"],
+            "ad_reached_countries": ["US"],
             "ad_type": "ALL",
             "ad_active_status": "ALL",
         },
@@ -93,46 +93,48 @@ def test_check_connection_success(handler):
     session.get.assert_called_once()
 
 
-def test_check_connection_fails_when_no_search_scope():
-    """Meta API returns 400 when neither search_page_ids nor search_terms is provided."""
+def test_check_connection_succeeds_when_no_search_scope():
     handler = MetaAdLibraryHandler(
         "meta_ad_library",
         connection_data={"access_token": "meta_token"},
     )
-    session = MagicMock()
-    session.get.return_value = _build_json_response(
-        {
-            "error": {
-                "message": "A search_terms or search_page_ids parameter is required",
-                "type": "GraphMethodException",
-                "code": 100,
-            }
-        },
-        status_code=400,
-    )
 
     with patch(
         "mindsdb.integrations.handlers.meta_ad_library_handler.meta_ad_library_handler.requests.Session",
-        return_value=session,
+        return_value=MagicMock(),
     ):
         response = handler.check_connection()
 
     assert isinstance(response, StatusResponse)
-    assert response.success is False
-    assert "search_terms or search_page_ids" in response.error_message
-    session.get.assert_called_once()
+    assert response.success is True
+    assert response.error_message is None
 
 
 def test_build_request_params_for_page_scope_does_not_send_search_type(handler):
     params = handler._build_request_params(conditions=[], limit=25)
 
     assert params["access_token"] == "meta_token"
-    assert params["ad_reached_countries"] == '["ALL"]'
+    assert params["ad_reached_countries"] == '["US"]'
     assert params["ad_type"] == "ALL"
     assert params["ad_active_status"] == "ALL"
     assert params["limit"] == 25
     assert params["search_page_ids"] == '["257702164651631"]'
     assert "search_type" not in params
+
+
+def test_build_request_params_converts_all_reached_countries_to_us():
+    handler = MetaAdLibraryHandler(
+        "meta_ad_library",
+        connection_data={
+            "access_token": "meta_token",
+            "search_page_ids": ["257702164651631"],
+            "ad_reached_countries": ["ALL"],
+        },
+    )
+
+    params = handler._build_request_params(conditions=[], limit=10)
+
+    assert params["ad_reached_countries"] == '["US"]'
 
 
 def test_build_request_params_for_keyword_scope_sends_default_search_type():
@@ -141,7 +143,7 @@ def test_build_request_params_for_keyword_scope_sends_default_search_type():
         connection_data={
             "access_token": "meta_token",
             "search_terms": "software engineer",
-            "ad_reached_countries": ["ALL"],
+            "ad_reached_countries": ["US"],
         },
     )
 
@@ -150,6 +152,58 @@ def test_build_request_params_for_keyword_scope_sends_default_search_type():
     assert params["search_terms"] == "software engineer"
     assert params["search_type"] == "KEYWORD_UNORDERED"
     assert "search_page_ids" not in params
+
+
+def test_build_request_params_uses_page_id_filter_as_runtime_scope():
+    handler = MetaAdLibraryHandler(
+        "meta_ad_library",
+        connection_data={
+            "access_token": "meta_token",
+            "ad_reached_countries": ["US"],
+        },
+    )
+    conditions = [
+        FilterCondition("page_id", FilterOperator.EQUAL, "257702164651631"),
+    ]
+
+    params = handler._build_request_params(conditions=conditions, limit=10)
+
+    assert params["search_page_ids"] == '["257702164651631"]'
+    assert conditions[0].applied is True
+    assert "search_terms" not in params
+
+
+def test_build_request_params_uses_page_name_filter_as_runtime_scope():
+    handler = MetaAdLibraryHandler(
+        "meta_ad_library",
+        connection_data={
+            "access_token": "meta_token",
+            "ad_reached_countries": ["US"],
+        },
+    )
+    conditions = [
+        FilterCondition("page_name", FilterOperator.EQUAL, "AG1 by Athletic Greens"),
+    ]
+
+    params = handler._build_request_params(conditions=conditions, limit=10)
+
+    assert params["search_terms"] == "AG1 by Athletic Greens"
+    assert params["search_type"] == "KEYWORD_UNORDERED"
+    assert conditions[0].applied is False
+    assert "search_page_ids" not in params
+
+
+def test_build_request_params_requires_scope_when_missing():
+    handler = MetaAdLibraryHandler(
+        "meta_ad_library",
+        connection_data={
+            "access_token": "meta_token",
+            "ad_reached_countries": ["US"],
+        },
+    )
+
+    with pytest.raises(ValueError, match="page_id/page_name"):
+        handler._build_request_params(conditions=[], limit=10)
 
 
 def test_build_request_params_translates_delivery_date_bounds(handler):
@@ -252,6 +306,7 @@ def test_fetch_ads_does_not_pre_limit_when_local_filters_remain(handler):
 
     assert [row["id"] for row in rows] == ["1", "2", "3", "4", "5"]
     assert session.get.call_args.kwargs["params"]["limit"] == handler.DEFAULT_PAGE_SIZE
+    assert session.get.call_args.kwargs["params"]["search_terms"] == "Pulse Media"
     assert conditions[0].applied is False
 
 
