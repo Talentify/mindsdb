@@ -24,7 +24,7 @@ class MetaAdLibraryHandler(APIHandler):
     name = "meta_ad_library"
 
     DEFAULT_API_VERSION = "v24.0"
-    DEFAULT_AD_REACHED_COUNTRIES = ["ALL"]
+    DEFAULT_AD_REACHED_COUNTRIES = ["US"]
     DEFAULT_AD_TYPE = "ALL"
     DEFAULT_AD_ACTIVE_STATUS = "ALL"
     DEFAULT_SEARCH_TYPE = "KEYWORD_UNORDERED"
@@ -60,7 +60,8 @@ class MetaAdLibraryHandler(APIHandler):
         response = StatusResponse(success=False)
         try:
             self.connect()
-            self.fetch_ads(limit=1)
+            if self._has_configured_search_scope():
+                self.fetch_ads(limit=1)
             response.success = True
         except Exception as exc:  # noqa: BLE001
             logger.error("Error connecting to Meta Ad Library: %s", exc)
@@ -86,6 +87,28 @@ class MetaAdLibraryHandler(APIHandler):
         if has_local_filters and limit is not None:
             params["limit"] = self.DEFAULT_PAGE_SIZE
 
+        logger.info(
+            "meta_ad_library.fetch_ads.start search_page_ids=%s search_terms=%r "
+            "ad_reached_countries=%s ad_type=%s ad_active_status=%s limit=%s "
+            "has_local_filters=%s conditions=%s",
+            self._coerce_to_list(params.get("search_page_ids")),
+            params.get("search_terms"),
+            self._coerce_to_list(params.get("ad_reached_countries")),
+            params.get("ad_type"),
+            params.get("ad_active_status"),
+            params.get("limit"),
+            has_local_filters,
+            [
+                {
+                    "column": condition.column,
+                    "op": str(condition.op),
+                    "value": condition.value,
+                    "applied": getattr(condition, "applied", False),
+                }
+                for condition in conditions
+            ],
+        )
+
         response_rows: list[dict[str, Any]] = []
         next_cursor: str | None = None
         pages_scanned = 0
@@ -98,6 +121,13 @@ class MetaAdLibraryHandler(APIHandler):
             payload = self._request(request_params)
             pages_scanned += 1
             rows = payload.get("data", [])
+            logger.info(
+                "meta_ad_library.fetch_ads.page page_number=%s row_count=%s has_next_cursor=%s request=%s",
+                pages_scanned,
+                len(rows),
+                bool(payload.get("paging", {}).get("cursors", {}).get("after")),
+                self._redact_request_params(request_params),
+            )
             response_rows.extend(self._normalize_row(row) for row in rows)
 
             if not has_local_filters and limit is not None and len(response_rows) >= limit:
@@ -114,14 +144,12 @@ class MetaAdLibraryHandler(APIHandler):
         conditions: list[FilterCondition] | None,
         limit: int | None,
     ) -> dict[str, Any]:
+        conditions = conditions or []
         params: dict[str, Any] = {
             "fields": ",".join(AdsTable.COLUMNS),
             "access_token": self.access_token,
             "ad_reached_countries": json.dumps(
-                self._coerce_to_list(
-                    self.connection_data.get("ad_reached_countries"),
-                    fallback=self.DEFAULT_AD_REACHED_COUNTRIES,
-                )
+                self._resolve_ad_reached_countries(self.connection_data.get("ad_reached_countries"))
             ),
             "ad_type": self.connection_data.get("ad_type", self.DEFAULT_AD_TYPE),
             "ad_active_status": self.connection_data.get(
@@ -135,10 +163,14 @@ class MetaAdLibraryHandler(APIHandler):
         }
 
         search_page_ids = self._coerce_to_list(self.connection_data.get("search_page_ids"))
+        if not search_page_ids:
+            search_page_ids = self._extract_page_id_scope(conditions)
         if search_page_ids:
             params["search_page_ids"] = json.dumps(search_page_ids)
 
         search_terms = self.connection_data.get("search_terms")
+        if not search_terms:
+            search_terms = self._extract_page_name_scope(conditions)
         if search_terms:
             params["search_terms"] = search_terms
             params["search_type"] = self.connection_data.get(
@@ -154,7 +186,12 @@ class MetaAdLibraryHandler(APIHandler):
         if publisher_platforms:
             params["publisher_platforms"] = json.dumps(publisher_platforms)
 
-        date_min, date_max = self._extract_delivery_date_bounds(conditions or [])
+        if not search_page_ids and not search_terms:
+            raise ValueError(
+                "Meta Ad Library queries require a datasource search scope or a WHERE filter on page_id/page_name."
+            )
+
+        date_min, date_max = self._extract_delivery_date_bounds(conditions)
         if date_min is not None:
             params["ad_delivery_date_min"] = date_min.isoformat()
         if date_max is not None:
@@ -166,11 +203,70 @@ class MetaAdLibraryHandler(APIHandler):
     def _has_unapplied_conditions(conditions: list[FilterCondition]) -> bool:
         return any(not getattr(condition, "applied", False) for condition in conditions)
 
+    def _has_configured_search_scope(self) -> bool:
+        return bool(self._coerce_to_list(self.connection_data.get("search_page_ids"))) or bool(
+            self.connection_data.get("search_terms")
+        )
+
+    @staticmethod
+    def _extract_page_id_scope(conditions: list[FilterCondition]) -> list[str]:
+        page_ids: list[str] = []
+
+        for condition in conditions:
+            if condition.column != "page_id":
+                continue
+
+            values: list[Any] | None = None
+            if condition.op == FilterOperator.EQUAL:
+                values = [condition.value]
+            elif condition.op == FilterOperator.IN and isinstance(condition.value, list):
+                values = condition.value
+
+            if values is None:
+                continue
+
+            normalized = [str(value).strip() for value in values if str(value).strip()]
+            if not normalized:
+                continue
+
+            condition.applied = True
+            page_ids.extend(normalized)
+
+        return page_ids
+
+    @staticmethod
+    def _extract_page_name_scope(conditions: list[FilterCondition]) -> str | None:
+        for condition in conditions:
+            if condition.column != "page_name":
+                continue
+            if condition.op not in {FilterOperator.EQUAL, FilterOperator.LIKE}:
+                continue
+            if not isinstance(condition.value, str):
+                continue
+
+            search_terms = condition.value.strip()
+            if not search_terms:
+                continue
+
+            if condition.op == FilterOperator.LIKE:
+                search_terms = search_terms.replace("%", "").strip()
+                if not search_terms:
+                    continue
+
+            return search_terms
+
+        return None
+
     def _request(self, params: dict[str, Any]) -> dict[str, Any]:
         if self.session is None:
             raise RuntimeError("Handler is not connected. Call connect() first.")
         response = self.session.get(self.base_url, params=params, timeout=30)
         if response.ok:
+            logger.info(
+                "meta_ad_library.request.success status_code=%s request=%s",
+                response.status_code,
+                self._redact_request_params(params),
+            )
             return response.json()
 
         message = response.text
@@ -182,7 +278,22 @@ class MetaAdLibraryHandler(APIHandler):
         except ValueError:
             pass
 
+        logger.error(
+            "meta_ad_library.request.failure status_code=%s request=%s response_text=%s",
+            response.status_code,
+            self._redact_request_params(params),
+            message,
+        )
+
         raise RuntimeError(f"Meta Ad Library request failed ({response.status_code}): {message}")
+
+    @staticmethod
+    def _redact_request_params(params: dict[str, Any]) -> dict[str, Any]:
+        return {
+            key: value
+            for key, value in params.items()
+            if key != "access_token"
+        }
 
     def _normalize_row(self, row: dict[str, Any]) -> dict[str, Any]:
         normalized: dict[str, Any] = {}
@@ -261,6 +372,17 @@ class MetaAdLibraryHandler(APIHandler):
                 condition.applied = True
 
         return date_min, date_max
+
+    @staticmethod
+    def _resolve_ad_reached_countries(value: Any) -> list[str]:
+        countries = MetaAdLibraryHandler._coerce_to_list(
+            value,
+            fallback=MetaAdLibraryHandler.DEFAULT_AD_REACHED_COUNTRIES,
+        )
+        normalized = [country.strip().upper() for country in countries if str(country).strip()]
+        if not normalized or "ALL" in normalized:
+            return list(MetaAdLibraryHandler.DEFAULT_AD_REACHED_COUNTRIES)
+        return normalized
 
     @staticmethod
     def _coerce_to_list(value: Any, fallback: list[str] | None = None) -> list[str]:

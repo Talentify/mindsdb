@@ -25,7 +25,7 @@ connection_args = OrderedDict(
     },
     ad_reached_countries={
         "type": ARG_TYPE.STR,
-        "description": "Optional JSON array of reached countries. Defaults to [\"ALL\"].",
+        "description": "Optional JSON array of reached countries. Defaults to [\"US\"].",
         "label": "Reached Countries",
         "required": False,
     },
@@ -76,7 +76,7 @@ connection_args = OrderedDict(
 connection_args_example = OrderedDict(
     access_token="your_access_token_here",
     search_page_ids='["257702164651631"]',
-    ad_reached_countries='["ALL"]',
+    ad_reached_countries='["US"]',
     ad_type="ALL",
     ad_active_status="ALL",
     search_type="KEYWORD_UNORDERED",
