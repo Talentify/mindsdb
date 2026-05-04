@@ -145,12 +145,16 @@ class MetaAdLibraryHandler(APIHandler):
         limit: int | None,
     ) -> dict[str, Any]:
         conditions = conditions or []
+        ad_reached_countries = self._extract_ad_reached_countries_scope(conditions)
+        if not ad_reached_countries:
+            ad_reached_countries = self._resolve_ad_reached_countries(
+                self.connection_data.get("ad_reached_countries")
+            )
+
         params: dict[str, Any] = {
             "fields": ",".join(AdsTable.COLUMNS),
             "access_token": self.access_token,
-            "ad_reached_countries": json.dumps(
-                self._resolve_ad_reached_countries(self.connection_data.get("ad_reached_countries"))
-            ),
+            "ad_reached_countries": json.dumps(ad_reached_countries),
             "ad_type": self.connection_data.get("ad_type", self.DEFAULT_AD_TYPE),
             "ad_active_status": self.connection_data.get(
                 "ad_active_status",
@@ -256,6 +260,39 @@ class MetaAdLibraryHandler(APIHandler):
             return search_terms
 
         return None
+
+    @classmethod
+    def _extract_ad_reached_countries_scope(
+        cls,
+        conditions: list[FilterCondition],
+    ) -> list[str]:
+        countries: list[str] = []
+
+        for condition in conditions:
+            if condition.column != "ad_reached_countries":
+                continue
+
+            values: list[Any] | None = None
+            if condition.op == FilterOperator.EQUAL:
+                values = cls._coerce_to_list(condition.value)
+            elif condition.op == FilterOperator.IN and isinstance(condition.value, list):
+                values = condition.value
+
+            if values is None:
+                continue
+
+            cleaned_values = [str(value).strip() for value in values if str(value).strip()]
+            if not cleaned_values:
+                continue
+
+            normalized = cls._resolve_ad_reached_countries(cleaned_values)
+            if not normalized:
+                continue
+
+            condition.applied = True
+            countries.extend(normalized)
+
+        return list(dict.fromkeys(countries))
 
     def _request(self, params: dict[str, Any]) -> dict[str, Any]:
         if self.session is None:
