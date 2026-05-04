@@ -173,6 +173,82 @@ def test_build_request_params_uses_page_id_filter_as_runtime_scope():
     assert "search_terms" not in params
 
 
+def test_build_request_params_uses_country_filter_as_runtime_scope():
+    handler = MetaAdLibraryHandler(
+        "meta_ad_library",
+        connection_data={
+            "access_token": "meta_token",
+            "search_page_ids": ["257702164651631"],
+            "ad_reached_countries": ["DE"],
+        },
+    )
+    conditions = [
+        FilterCondition("ad_reached_countries", FilterOperator.EQUAL, "us"),
+    ]
+
+    params = handler._build_request_params(conditions=conditions, limit=10)
+
+    assert params["ad_reached_countries"] == '["US"]'
+    assert conditions[0].applied is True
+
+
+def test_build_request_params_uses_country_in_filter_as_runtime_scope():
+    handler = MetaAdLibraryHandler(
+        "meta_ad_library",
+        connection_data={
+            "access_token": "meta_token",
+            "search_page_ids": ["257702164651631"],
+            "ad_reached_countries": ["DE"],
+        },
+    )
+    conditions = [
+        FilterCondition("ad_reached_countries", FilterOperator.IN, ["ca", "us", "CA"]),
+    ]
+
+    params = handler._build_request_params(conditions=conditions, limit=10)
+
+    assert params["ad_reached_countries"] == '["CA", "US"]'
+    assert conditions[0].applied is True
+
+
+def test_build_request_params_accepts_json_encoded_country_filter():
+    handler = MetaAdLibraryHandler(
+        "meta_ad_library",
+        connection_data={
+            "access_token": "meta_token",
+            "search_page_ids": ["257702164651631"],
+            "ad_reached_countries": ["DE"],
+        },
+    )
+    conditions = [
+        FilterCondition("ad_reached_countries", FilterOperator.EQUAL, '["US"]'),
+    ]
+
+    params = handler._build_request_params(conditions=conditions, limit=10)
+
+    assert params["ad_reached_countries"] == '["US"]'
+    assert conditions[0].applied is True
+
+
+def test_build_request_params_ignores_empty_country_filter_and_keeps_connection_scope():
+    handler = MetaAdLibraryHandler(
+        "meta_ad_library",
+        connection_data={
+            "access_token": "meta_token",
+            "search_page_ids": ["257702164651631"],
+            "ad_reached_countries": ["DE"],
+        },
+    )
+    conditions = [
+        FilterCondition("ad_reached_countries", FilterOperator.EQUAL, " "),
+    ]
+
+    params = handler._build_request_params(conditions=conditions, limit=10)
+
+    assert params["ad_reached_countries"] == '["DE"]'
+    assert getattr(conditions[0], "applied", False) is False
+
+
 def test_build_request_params_uses_page_name_filter_as_runtime_scope():
     handler = MetaAdLibraryHandler(
         "meta_ad_library",
