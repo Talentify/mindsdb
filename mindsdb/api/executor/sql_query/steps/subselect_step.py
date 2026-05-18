@@ -89,6 +89,66 @@ def _strip_where_absent_columns(where_node, df_columns_lower):
     return where_node
 
 
+def _strip_applied_where_columns(where_node, applied_cols_lower):
+    """Remove WHERE branches for columns the API handler already consumed.
+
+    API handlers mark certain WHERE params (url, start_date, etc.) as applied
+    after using them to call the external API.  These column names are
+    propagated via ``DataFrame.attrs['_applied_where_columns']``.  If such a
+    column also appears in the response data (name collision), DuckDB would
+    re-evaluate the condition against the *response* value — which differs
+    from the original API-param value — producing false negatives.
+
+    Uses the same AND-tree walk as ``_strip_where_absent_columns``.
+    """
+    if where_node is None:
+        return None
+
+    if isinstance(where_node, BinaryOperation):
+        op = where_node.op.lower()
+
+        if op == 'and':
+            left = _strip_applied_where_columns(where_node.args[0], applied_cols_lower)
+            right = _strip_applied_where_columns(where_node.args[1], applied_cols_lower)
+            if left is None and right is None:
+                return None
+            if left is None:
+                return right
+            if right is None:
+                return left
+            where_node.args = [left, right]
+            return where_node
+
+        if op == 'or':
+            if _has_applied_column(where_node, applied_cols_lower):
+                return None
+            return where_node
+
+        if _has_applied_column(where_node, applied_cols_lower):
+            return None
+        return where_node
+
+    if isinstance(where_node, BetweenOperation):
+        if _has_applied_column(where_node, applied_cols_lower):
+            return None
+        return where_node
+
+    return where_node
+
+
+def _has_applied_column(node, applied_cols_lower):
+    """True if *node* references any column in the applied set."""
+    found = [False]
+
+    def _check(n, **kwargs):
+        if isinstance(n, Identifier) and not kwargs.get('is_table'):
+            if n.parts[-1].lower() in applied_cols_lower:
+                found[0] = True
+
+    query_traversal(node, _check)
+    return found[0]
+
+
 class SubSelectStepCall(BaseStepCall):
     bind = SubSelectStep
 
@@ -135,6 +195,10 @@ class SubSelectStepCall(BaseStepCall):
         if isinstance(query, Select) and query.where is not None:
             df_cols_lower = {c.lower() for c in df.columns}
             query.where = _strip_where_absent_columns(query.where, df_cols_lower)
+
+            applied_cols = df.attrs.get('_applied_where_columns', set())
+            if applied_cols:
+                query.where = _strip_applied_where_columns(query.where, applied_cols)
 
         res = query_df(df, query, session=self.session)
 

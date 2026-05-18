@@ -145,7 +145,25 @@ query2 = Select(
 )
 ```
 
-### 3. JOIN column collection must include WHERE — `plan_join.py`
+### 3. Handler-consumed WHERE params must not be re-evaluated by SubSelectStep — `api_handler.py`, `subselect_step.py`
+
+`plan_api_db_select` splits an API query into `FetchDataframeStep` (handler) + `SubSelectStep` (DuckDB). Both receive the original WHERE (`plan_sub_select` deep-copies it). When a handler-consumed param name (e.g. `url`) collides with a column in the API response, DuckDB re-evaluates the condition against the response value and filters out all rows.
+
+**Fix**: `APIResource.select()` propagates applied column names via `DataFrame.attrs['_applied_where_columns']`. `SubSelectStepCall` reads them and strips matching conditions from WHERE before DuckDB runs. Only handler-consumed conditions are stripped; non-consumed conditions remain for double-filtering safety.
+
+```python
+# api_handler.py — APIResource.select(), after filter_dataframe()
+applied_where_cols = {cond.column.lower() for cond in conditions if cond.applied}
+if applied_where_cols:
+    result.attrs['_applied_where_columns'] = applied_where_cols
+
+# subselect_step.py — SubSelectStepCall.call(), after _strip_where_absent_columns()
+applied_cols = df.attrs.get('_applied_where_columns', set())
+if applied_cols:
+    query.where = _strip_applied_where_columns(query.where, applied_cols)
+```
+
+### 4. JOIN column collection must include WHERE — `plan_join.py`
 
 `_collect_fetch_columns` runs on `query.targets` and `tbl.join_condition`, but columns referenced **only in the WHERE clause** (e.g. `LOWER(t2.sessionSourceMedium) LIKE '%linkedin%'`) are never added to `referenced_cols`. The handler then does not fetch them, and DuckDB fails with `Column not found`.
 
@@ -159,7 +177,7 @@ for tbl in self.tables:
         query_traversal(tbl.join_condition, _collect_fetch_columns)
 ```
 
-### 4. JOIN `filter_col_names` must use `item.conditions`, not `conditions` — `plan_join.py`
+### 5. JOIN `filter_col_names` must use `item.conditions`, not `conditions` — `plan_join.py`
 
 `process_table()` computes `filter_col_names` to exclude API filter parameters (e.g. `start_date = 'yesterday'`) from the SELECT list so they aren't sent to the API as dimensions. Two bugs to avoid:
 
