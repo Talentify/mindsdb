@@ -443,13 +443,12 @@ class QueryPlanner:
         )
         prev_step = self.plan_integration_select(query2)
 
-        # Clear limit — handler applies it via the API.
         query.limit = None
         # Keep WHERE for the SubSelectStep/DuckDB layer. The handler extracts
         # API-specific params (start_date, url, etc.) but cannot process complex
         # conditions (OR, LIKE patterns, IS NULL). DuckDB handles all of these.
-        # Non-existent columns (handler params consumed by the API) are stripped
-        # at execution time in SubSelectStepCall before DuckDB runs.
+        # Handler-consumed conditions (applied=True) are stripped at execution
+        # time in SubSelectStepCall via DataFrame attrs propagated by APIResource.
         return self.plan_sub_select(query, prev_step)
 
     def plan_nested_select(self, select):

@@ -199,6 +199,10 @@ class APIResource(APITable):
 
         result = filter_dataframe(result, filters)
 
+        applied_where_cols = {cond.column.lower() for cond in conditions if cond.applied}
+        if applied_where_cols:
+            result.attrs['_applied_where_columns'] = applied_where_cols
+
         if sort:
             sort_columns = []
             for idx, a_sort in enumerate(sort):
