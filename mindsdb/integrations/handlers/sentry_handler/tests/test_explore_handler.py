@@ -58,8 +58,8 @@ class ExploreSentryTablesTest(unittest.TestCase):
                         "timestamp": "2026-03-18T10:00:00Z",
                         "severity": "error",
                         "message": "Refresh token expired",
-                        "trace.id": "trace-1",
-                        "span.id": "span-1",
+                        "trace_id": "trace-1",
+                        "span_id": "span-1",
                         "sentry.release": "2026.3.18",
                         "logger.name": "auth.worker",
                         "attributes": {
@@ -87,7 +87,7 @@ class ExploreSentryTablesTest(unittest.TestCase):
             conditions=conditions,
             limit=50,
             sort=[SortColumn("timestamp", ascending=False)],
-            targets=["timestamp", "message", "level", "project_slug"],
+            targets=["timestamp", "message", "level", "trace_id", "span_id", "project_slug"],
         )
 
         base_client.request_json.assert_called_once()
@@ -98,7 +98,7 @@ class ExploreSentryTablesTest(unittest.TestCase):
         self.assertEqual("logs", params["dataset"])
         self.assertEqual([99], params["project"])
         self.assertEqual(["production"], params["environment"])
-        self.assertEqual(sorted(["timestamp", "message", "severity"]), sorted(params["field"]))
+        self.assertEqual(sorted(["timestamp", "message", "severity", "trace_id", "span_id"]), sorted(params["field"]))
         self.assertEqual("-timestamp", params["sort"])
         self.assertIn("severity:error", params["query"])
         self.assertIn("*token*", params["query"])
@@ -106,6 +106,8 @@ class ExploreSentryTablesTest(unittest.TestCase):
         self.assertEqual("mktplace", df.iloc[0]["project_slug"])
         self.assertEqual("production", df.iloc[0]["environment"])
         self.assertEqual("auth.worker", df.iloc[0]["logger"])
+        self.assertEqual("trace-1", df.iloc[0]["trace_id"])
+        self.assertEqual("span-1", df.iloc[0]["span_id"])
         self.assertEqual(
             {"member_id": "member-1", "org_id": "org-1"},
             json.loads(df.iloc[0]["extra_json"]),
