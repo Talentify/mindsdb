@@ -30,15 +30,15 @@ LOG_FIELD_MAP = {
     "timestamp": "timestamp",
     "level": "severity",
     "message": "message",
-    "trace_id": "trace.id",
-    "span_id": "span.id",
+    "trace_id": "trace_id",
+    "span_id": "span_id",
     "release": "sentry.release",
     "logger": "logger.name",
 }
 LOG_QUERY_KEY_MAP = {
     "level": "severity",
-    "trace_id": "trace.id",
-    "span_id": "span.id",
+    "trace_id": "trace_id",
+    "span_id": "span_id",
     "release": "sentry.release",
     "logger": "logger.name",
 }
