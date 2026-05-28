@@ -20,7 +20,10 @@ WITH
     parameters = {
       "aws_access_key_id": "AQAXEQK89OX07YS34OP",
       "aws_secret_access_key": "wJalrXUtnFEMI/K7MDENG/bPxRfiCYEXAMPLEKEY",
-      "bucket": "my-bucket"
+      "bucket": "my-bucket",
+      "path_prefix": "rules/country=US/",
+      "list_cache_ttl_seconds": 300,
+      "include_metadata": false
     };
 ```
 
@@ -37,6 +40,9 @@ Optional connection parameters include the following:
 
 * `aws_session_token`: The AWS session token that identifies the user or IAM role. This becomes necessary when using temporary security credentials.
 * `bucket`: The name of the Amazon S3 bucket. If not provided, all available buckets can be queried, however, this can affect performance, especially when listing all of the available objects.
+* `path_prefix`: An optional S3 key prefix used to pre-filter objects returned by the `files` table.
+* `list_cache_ttl_seconds`: Optional cache TTL, in seconds, for S3 object listings used by the `files` table. Defaults to 300 seconds.
+* `include_metadata`: Whether to include custom S3 object metadata in the `files` table. Defaults to false. When enabled, the handler calls `HeadObject` for each listed file.
 
 ## Usage
 
@@ -67,12 +73,36 @@ SELECT *
 FROM s3_datasource.files LIMIT 10
 ```
 
+The `files` table includes standard object details returned by S3 listing operations: `path`, `name`, `extension`, `bucket`, `size`, `last_modified`, `etag`, and `storage_class`. These fields do not require per-object metadata requests.
+
+Use path filters to list a subset of objects. Prefix-like filters can be pushed down to S3 listing, and the cached listing can then be filtered by DuckDB:
+
+```sql
+SELECT path, size, last_modified
+FROM s3_datasource.files
+WHERE path LIKE 'rules/country=US/state=CA/%'
+  AND path LIKE '%dimension=pay_transparency/%';
+```
+
+Use exact path filters when you already know which documents to read. This avoids listing the bucket and directly checks the requested objects:
+
+```sql
+SELECT path, content
+FROM s3_datasource.files
+WHERE path IN (
+  'rules/country=US/scope=federal/dimension=eeo_aap/rule_id=eeoc-eeo/version=2026-01-01/source.md',
+  'rules/country=US/state=CA/scope=state/dimension=pay_transparency/rule_id=ca-pay-transparency/version=2026-01-01/source.md'
+);
+```
+
 The content of files can also be retrieved by explicitly requesting the `content` column. This column is empty by default to avoid unnecessary data transfer:
 
 ```sql
 SELECT path, content
 FROM s3_datasource.files LIMIT 10
 ```
+
+Custom S3 object metadata can be returned in the `metadata` column when `include_metadata` is set to true. This is intended for inspection and enrichment workflows, not high-volume filtering, because S3 requires one `HeadObject` request per file to retrieve custom metadata.
 
 <Tip>
 This table will return all objects regardless of the file format, however, only the supported file formats mentioned above can be queried.

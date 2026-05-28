@@ -1,4 +1,6 @@
+import json
 import os
+import time
 from typing import List
 from contextlib import contextmanager
 from io import BytesIO
@@ -34,7 +36,10 @@ class ListFilesTable(APIResource):
     def list(
         self, targets: List[str] = None, conditions: List[FilterCondition] = None, limit: int = None, *args, **kwargs
     ) -> pd.DataFrame:
+        conditions = conditions or []
         buckets = None
+        exact_paths = None
+        prefix = self.handler.path_prefix
         for condition in conditions:
             if condition.column == "bucket":
                 if condition.op == FilterOperator.IN:
@@ -42,27 +47,43 @@ class ListFilesTable(APIResource):
                 elif condition.op == FilterOperator.EQUAL:
                     buckets = [condition.value]
                 condition.applied = True
+            elif condition.column == "path":
+                if condition.op == FilterOperator.IN:
+                    exact_paths = condition.value
+                    condition.applied = True
+                elif condition.op == FilterOperator.EQUAL:
+                    exact_paths = [condition.value]
+                    condition.applied = True
+                elif condition.op == FilterOperator.LIKE and isinstance(condition.value, str):
+                    prefix = self.handler.combine_prefixes(prefix, self.handler.get_prefix_from_like(condition.value))
 
         data = []
-        for obj in self.handler.get_objects(limit=limit, buckets=buckets):
-            path = obj["Key"]
-            path = path.replace("`", "")
-            item = {
-                "path": path,
-                "bucket": obj["Bucket"],
-                "name": path[path.rfind("/") + 1 :],
-                "extension": path[path.rfind(".") + 1 :],
-            }
+        if exact_paths is not None:
+            objects = self.handler.get_objects_by_paths(exact_paths, buckets=buckets)
+        else:
+            has_unapplied_conditions = any(not condition.applied for condition in conditions)
+            list_limit = None if has_unapplied_conditions else limit
+            objects = self.handler.get_objects(limit=list_limit, buckets=buckets, prefix=prefix)
 
-            if targets and "public_url" in targets:
-                item["public_url"] = self.handler.generate_sas_url(path, obj["Bucket"])
-
-            data.append(item)
+        for obj in objects:
+            data.append(self.handler.object_to_file_row(obj, targets=targets))
 
         return pd.DataFrame(data=data, columns=self.get_columns())
 
     def get_columns(self) -> List[str]:
-        return ["path", "name", "extension", "bucket", "content", "public_url"]
+        return [
+            "path",
+            "name",
+            "extension",
+            "bucket",
+            "size",
+            "last_modified",
+            "etag",
+            "storage_class",
+            "content",
+            "public_url",
+            "metadata",
+        ]
 
 
 class FileTable(APIResource):
@@ -102,6 +123,10 @@ class S3Handler(APIHandler):
         self.is_connected = False
         self.cache_thread_safe = True
         self.bucket = self.connection_data.get("bucket")
+        self.path_prefix = self._normalize_prefix(self.connection_data.get("path_prefix"))
+        self.include_metadata = self._coerce_bool(self.connection_data.get("include_metadata", False))
+        self.list_cache_ttl_seconds = int(self.connection_data.get("list_cache_ttl_seconds") or 300)
+        self._objects_cache = {}
         self._regions = {}
 
         self._files_table = ListFilesTable(self)
@@ -276,6 +301,81 @@ class S3Handler(APIHandler):
         ar = key.split("/")
         return ar[0], "/".join(ar[1:])
 
+    @staticmethod
+    def _coerce_bool(value) -> bool:
+        if isinstance(value, bool):
+            return value
+        if isinstance(value, str):
+            return value.strip().lower() in {"1", "true", "yes", "y", "on"}
+        return bool(value)
+
+    @staticmethod
+    def _normalize_prefix(prefix):
+        if prefix is None:
+            return None
+        prefix = str(prefix).strip()
+        if prefix == "":
+            return None
+        return prefix.lstrip("/")
+
+    @staticmethod
+    def get_prefix_from_like(value: str):
+        """Extract the S3-prefix-safe part of a SQL LIKE pattern."""
+        wildcard_positions = [pos for pos in (value.find("%"), value.find("_")) if pos >= 0]
+        if not wildcard_positions:
+            return value
+        wildcard_pos = min(wildcard_positions)
+        if wildcard_pos == 0:
+            return None
+        return value[:wildcard_pos]
+
+    @classmethod
+    def combine_prefixes(cls, base_prefix, filter_prefix):
+        base_prefix = cls._normalize_prefix(base_prefix)
+        filter_prefix = cls._normalize_prefix(filter_prefix)
+        if not base_prefix:
+            return filter_prefix
+        if not filter_prefix:
+            return base_prefix
+        if filter_prefix.startswith(base_prefix):
+            return filter_prefix
+        if base_prefix.startswith(filter_prefix):
+            return base_prefix
+        return base_prefix
+
+    def _display_path(self, bucket: str, key: str) -> str:
+        if self.bucket is None:
+            return f"{bucket}/{key}"
+        return key
+
+    def object_to_file_row(self, obj: dict, targets: List[str] = None) -> dict:
+        path = obj["Key"].replace("`", "")
+        name = path[path.rfind("/") + 1 :]
+        extension = name[name.rfind(".") + 1 :] if "." in name else ""
+        raw_key = obj.get("_S3Key", obj["Key"])
+
+        item = {
+            "path": path,
+            "bucket": obj["Bucket"],
+            "name": name,
+            "extension": extension,
+            "size": obj.get("Size"),
+            "last_modified": obj.get("LastModified"),
+            "etag": (obj.get("ETag") or "").strip('"'),
+            "storage_class": obj.get("StorageClass", "STANDARD"),
+        }
+
+        if targets and "public_url" in targets:
+            item["public_url"] = self.generate_sas_url(raw_key, obj["Bucket"])
+
+        if self.include_metadata and (not targets or "metadata" in targets):
+            metadata = obj.get("_Metadata")
+            if metadata is None:
+                metadata = self.get_object_metadata(obj["Bucket"], raw_key)
+            item["metadata"] = json.dumps(metadata)
+
+        return item
+
     def read_as_table(self, key, chunk_size: int = None, chunk_overlap: int = None) -> pd.DataFrame:
         """
         Read object as dataframe. Uses duckdb for structured files, FileReader for text files
@@ -413,13 +513,74 @@ class S3Handler(APIHandler):
         query_ast = parse_sql(query)
         return self.query(query_ast)
 
-    def get_objects(self, limit=None, buckets=None) -> List[dict]:
+    def get_objects_by_paths(self, paths, buckets=None) -> List[dict]:
+        client = self.connect()
+        objects = []
+        for path in paths:
+            bucket, key = self._get_bucket(path)
+            if buckets is not None and bucket not in buckets:
+                continue
+
+            try:
+                obj = client.head_object(Bucket=bucket, Key=key)
+            except ClientError as e:
+                logger.error(f"Error querying the file {key} in the bucket {bucket}, {e}!")
+                continue
+
+            objects.append(
+                {
+                    "Bucket": bucket,
+                    "Key": self._display_path(bucket, key),
+                    "_S3Key": key,
+                    "Size": obj.get("ContentLength"),
+                    "LastModified": obj.get("LastModified"),
+                    "ETag": obj.get("ETag"),
+                    "StorageClass": obj.get("StorageClass", "STANDARD"),
+                    "_Metadata": obj.get("Metadata"),
+                }
+            )
+
+        return objects
+
+    def get_object_metadata(self, bucket: str, key: str) -> dict:
+        client = self.connect()
+        return client.head_object(Bucket=bucket, Key=key).get("Metadata", {})
+
+    def _get_cached_bucket_objects(self, bucket: str, prefix=None) -> List[dict]:
+        client = self.connect()
+        prefix = self._normalize_prefix(prefix)
+        cache_key = (bucket, prefix or "")
+        cache_entry = self._objects_cache.get(cache_key)
+        now = time.time()
+        if (
+            cache_entry is not None
+            and self.list_cache_ttl_seconds > 0
+            and now - cache_entry["created_at"] < self.list_cache_ttl_seconds
+        ):
+            return cache_entry["objects"]
+
+        paginator = client.get_paginator("list_objects_v2")
+        pagination_kwargs = {"Bucket": bucket}
+        if prefix:
+            pagination_kwargs["Prefix"] = prefix
+
+        objects = []
+        for page in paginator.paginate(**pagination_kwargs):
+            for obj in page.get("Contents", []):
+                if obj.get("StorageClass", "STANDARD") != "STANDARD":
+                    continue
+                objects.append(dict(obj))
+
+        if self.list_cache_ttl_seconds > 0:
+            self._objects_cache[cache_key] = {"created_at": now, "objects": objects}
+
+        return objects
+
+    def get_objects(self, limit=None, buckets=None, prefix=None) -> List[dict]:
         client = self.connect()
         if self.bucket is not None:
-            add_bucket_to_name = False
             scan_buckets = [self.bucket]
         else:
-            add_bucket_to_name = True
             scan_buckets = [b["Name"] for b in client.list_buckets()["Buckets"]]
 
         objects = []
@@ -427,21 +588,15 @@ class S3Handler(APIHandler):
             if buckets is not None and bucket not in buckets:
                 continue
 
-            resp = client.list_objects_v2(Bucket=bucket)
-            if "Contents" not in resp:
-                continue
-
-            for obj in resp["Contents"]:
-                if obj.get("StorageClass", "STANDARD") != "STANDARD":
-                    continue
-
+            for obj in self._get_cached_bucket_objects(bucket, prefix=prefix):
+                obj = dict(obj)
+                raw_key = obj["Key"]
                 obj["Bucket"] = bucket
-                if add_bucket_to_name:
-                    # bucket is part of the name
-                    obj["Key"] = f"{bucket}/{obj['Key']}"
+                obj["_S3Key"] = raw_key
+                obj["Key"] = self._display_path(bucket, raw_key)
                 objects.append(obj)
-            if limit is not None and len(objects) >= limit:
-                break
+                if limit is not None and len(objects) >= limit:
+                    return objects[: int(limit)]
 
         return objects
 
