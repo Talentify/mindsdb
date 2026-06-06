@@ -123,7 +123,7 @@ class S3Handler(APIHandler):
         self.is_connected = False
         self.cache_thread_safe = True
         self.bucket = self.connection_data.get("bucket")
-        self.path_prefix = self._normalize_prefix(self.connection_data.get("path_prefix"))
+        self.path_prefix = self._normalize_prefix(self.connection_data.get("path_prefix") or self.connection_data.get("prefix"))
         self.include_metadata = self._coerce_bool(self.connection_data.get("include_metadata", False))
         self.list_cache_ttl_seconds = int(self.connection_data.get("list_cache_ttl_seconds") or 300)
         self._objects_cache = {}
@@ -173,14 +173,17 @@ class S3Handler(APIHandler):
             pass
         duckdb_conn.execute("LOAD httpfs")
 
-        # detect region for bucket
-        if bucket not in self._regions:
-            client = self.connect()
-            bucket_region = client.get_bucket_location(Bucket=bucket).get("LocationConstraint")
-            # LocationConstraint pode ser None para us-east-1
-            self._regions[bucket] = bucket_region or "us-east-1"
-
-        region = self.connection_data.get("region_name", self._regions.get(bucket, "us-east-1"))
+        # detect region for bucket only when region_name not provided
+        configured_region = self.connection_data.get("region_name")
+        if configured_region:
+            region = configured_region
+        else:
+            if bucket not in self._regions:
+                client = self.connect()
+                bucket_region = client.get_bucket_location(Bucket=bucket).get("LocationConstraint")
+                # LocationConstraint pode ser None para us-east-1
+                self._regions[bucket] = bucket_region or "us-east-1"
+            region = self._regions.get(bucket, "us-east-1")
         region = region or "us-east-1"
 
         credentials = None

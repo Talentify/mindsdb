@@ -29,6 +29,12 @@ connection_args = OrderedDict(
         'required': False,
         'label': 'S3 Path Prefix'
     },
+    prefix={
+        'type': ARG_TYPE.STR,
+        'description': 'Alias for path_prefix. Optional S3 key prefix used to pre-filter objects returned by the files table.',
+        'required': False,
+        'label': 'S3 Prefix'
+    },
     include_metadata={
         'type': ARG_TYPE.BOOL,
         'description': 'Whether to include custom S3 object metadata in the files table. Defaults to false and requires one HeadObject request per file when enabled.',
@@ -63,6 +69,7 @@ connection_args_example = OrderedDict(
     region_name='us-east-2',
     bucket='my-bucket',
     path_prefix='rules/country=US/',
+    prefix='rules/country=US/',
     include_metadata=False,
     list_cache_ttl_seconds=300,
 )
