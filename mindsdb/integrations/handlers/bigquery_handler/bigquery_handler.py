@@ -6,7 +6,9 @@ from google.api_core.exceptions import BadRequest, NotFound
 import pandas as pd
 from sqlalchemy_bigquery.base import BigQueryDialect
 
+from mindsdb.integrations.handlers.bigquery_handler import query_stats_registry
 from mindsdb.utilities import log
+from mindsdb.utilities.context import context as ctx
 from mindsdb_sql_parser.ast.base import ASTNode
 from mindsdb.integrations.libs.base import MetaDatabaseHandler
 from mindsdb.utilities.render.sqlalchemy_render import SqlalchemyRender
@@ -287,8 +289,9 @@ class BigQueryHandler(MetaDatabaseHandler):
             job_config = QueryJobConfig(
                 default_dataset=f"{self.connection_data['project_id']}.{self.connection_data['dataset']}"
             )
-            query = connection.query(query, job_config=job_config)
-            result = query.to_dataframe()
+            query_job = connection.query(query, job_config=job_config)
+            result = query_job.to_dataframe()
+            self._record_query_stats(query_job)
             if not result.empty:
                 response = Response(RESPONSE_TYPE.TABLE, result)
             else:
@@ -297,6 +300,21 @@ class BigQueryHandler(MetaDatabaseHandler):
             logger.error(f"Error running query: {query} on {self.connection_data['project_id']}!")
             response = Response(RESPONSE_TYPE.ERROR, error_message=str(e))
         return response
+
+    def _record_query_stats(self, query_job) -> None:
+        """Capture BigQuery QueryJob stats into the in-process registry if a correlation id is present."""
+        try:
+            query_id = ctx.params.get("correlation_id") if isinstance(ctx.params, dict) else None
+            if not query_id:
+                return
+            query_stats_registry.accumulate(
+                query_id,
+                bytes_billed=int(query_job.total_bytes_billed or 0),
+                cache_hit=bool(query_job.cache_hit),
+                project_id=self.connection_data.get("project_id", ""),
+            )
+        except Exception:  # noqa: BLE001
+            pass
 
     def query(self, query: ASTNode) -> Response:
         """

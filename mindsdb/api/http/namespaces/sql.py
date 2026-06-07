@@ -28,6 +28,7 @@ from mindsdb.utilities.context import context as ctx
 from mindsdb.utilities.exception import QueryError
 from mindsdb.utilities.functions import mark_process
 from mindsdb.interfaces.agents.chart_agent import ChartAgent
+from mindsdb.integrations.handlers.bigquery_handler import query_stats_registry
 
 logger = log.getLogger(__name__)
 
@@ -386,6 +387,21 @@ class ParametrizeConstants(Resource):
         databases = {k: list(v) for k, v in databases.items()}
         response = {"query": str(query), "parameters": parameters, "databases": databases}
         return response, 200
+
+
+@ns_conf.route("/query_stats/<string:query_id>")
+@ns_conf.param("query_id", "Correlation id supplied by the caller when executing the query")
+class QueryStats(Resource):
+    @ns_conf.doc("query_stats")
+    @api_endpoint_metrics("GET", "/sql/query_stats")
+    def get(self, query_id):
+        """Return and remove BigQuery execution stats for the given correlation id.
+
+        Returns a JSON object with total_bytes_billed, cache_hit, and project_id,
+        or an empty object if the id is not found.
+        """
+        stats = query_stats_registry.pop(query_id)
+        return stats, 200
 
 
 @ns_conf.route("/list_databases")
