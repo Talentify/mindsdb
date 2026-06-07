@@ -28,6 +28,7 @@ from mindsdb.utilities.context import context as ctx
 from mindsdb.utilities.exception import QueryError
 from mindsdb.utilities.functions import mark_process
 from mindsdb.interfaces.agents.chart_agent import ChartAgent
+from mindsdb.integrations.handlers.bigquery_handler import query_stats_registry
 
 logger = log.getLogger(__name__)
 
@@ -399,8 +400,6 @@ class QueryStats(Resource):
         Returns a JSON object with total_bytes_billed, cache_hit, and project_id,
         or an empty object if the id is not found.
         """
-        from mindsdb.integrations.handlers.bigquery_handler import query_stats_registry  # noqa: PLC0415
-
         stats = query_stats_registry.pop(query_id)
         return stats, 200
 

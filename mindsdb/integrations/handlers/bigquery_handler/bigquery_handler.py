@@ -6,7 +6,9 @@ from google.api_core.exceptions import BadRequest, NotFound
 import pandas as pd
 from sqlalchemy_bigquery.base import BigQueryDialect
 
+from mindsdb.integrations.handlers.bigquery_handler import query_stats_registry
 from mindsdb.utilities import log
+from mindsdb.utilities.context import context as ctx
 from mindsdb_sql_parser.ast.base import ASTNode
 from mindsdb.integrations.libs.base import MetaDatabaseHandler
 from mindsdb.utilities.render.sqlalchemy_render import SqlalchemyRender
@@ -302,9 +304,6 @@ class BigQueryHandler(MetaDatabaseHandler):
     def _record_query_stats(self, query_job) -> None:
         """Capture BigQuery QueryJob stats into the in-process registry if a correlation id is present."""
         try:
-            from mindsdb.utilities.context import context as ctx  # noqa: PLC0415
-            from mindsdb.integrations.handlers.bigquery_handler import query_stats_registry  # noqa: PLC0415
-
             query_id = ctx.params.get("mktplace_query_id") if isinstance(ctx.params, dict) else None
             if not query_id:
                 return
