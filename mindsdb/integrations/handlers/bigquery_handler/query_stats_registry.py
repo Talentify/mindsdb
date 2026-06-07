@@ -12,6 +12,8 @@ _lock = threading.Lock()
 _registry: dict[str, dict] = {}
 _MAX_ENTRIES = 10_000
 _TTL_SECONDS = 300.0
+_EVICT_INTERVAL_SECONDS = 60.0
+_last_evict = 0.0
 
 
 def accumulate(query_id: str, bytes_billed: int, cache_hit: bool, project_id: str) -> None:
@@ -22,7 +24,7 @@ def accumulate(query_id: str, bytes_billed: int, cache_hit: bool, project_id: st
     """
     now = time.monotonic()
     with _lock:
-        _evict()
+        _evict(now)
         if len(_registry) >= _MAX_ENTRIES:
             return
         if query_id in _registry:
@@ -45,9 +47,16 @@ def pop(query_id: str) -> dict:
     return entry
 
 
-def _evict() -> None:
-    """Remove TTL-expired entries. Must be called with _lock held."""
-    now = time.monotonic()
+def _evict(now: float) -> None:
+    """Remove TTL-expired entries. Must be called with _lock held.
+
+    Throttled to scan at most once per _EVICT_INTERVAL_SECONDS so that the
+    O(n) sweep does not run on every accumulate() call.
+    """
+    global _last_evict
+    if now - _last_evict < _EVICT_INTERVAL_SECONDS:
+        return
+    _last_evict = now
     expired = [k for k, v in _registry.items() if now - v["_ts"] > _TTL_SECONDS]
     for k in expired:
         del _registry[k]

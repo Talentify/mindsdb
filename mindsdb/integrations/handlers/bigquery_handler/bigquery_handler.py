@@ -304,7 +304,7 @@ class BigQueryHandler(MetaDatabaseHandler):
     def _record_query_stats(self, query_job) -> None:
         """Capture BigQuery QueryJob stats into the in-process registry if a correlation id is present."""
         try:
-            query_id = ctx.params.get("mktplace_query_id") if isinstance(ctx.params, dict) else None
+            query_id = ctx.params.get("correlation_id") if isinstance(ctx.params, dict) else None
             if not query_id:
                 return
             query_stats_registry.accumulate(
