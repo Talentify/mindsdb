@@ -236,6 +236,20 @@ class S3VectorsHandler(VectorStoreHandler):
             logger.error(f"Error listing indexes: {e}")
             raise Exception(f"Error listing indexes from bucket '{self.vector_bucket}': {e}")
 
+    def get_dimension(self, table_name: str) -> int:
+        """Get the vector dimension configured for an S3 Vectors index."""
+        connection = self.connect()
+
+        try:
+            response = connection.get_index(
+                vectorBucketName=self.vector_bucket,
+                indexName=table_name,
+            )
+            return response["index"]["dimension"]
+        except Exception as e:
+            logger.error(f"Error getting dimension for index '{table_name}': {e}")
+            raise Exception(f"Error getting dimension for index '{table_name}': {e}")
+
     def create_table(self, table_name: str, if_not_exists=True):
         """Create a vector index with the given name in the S3 Vectors bucket."""
         connection = self.connect()
@@ -259,7 +273,7 @@ class S3VectorsHandler(VectorStoreHandler):
             logger.info(f"Created index '{table_name}' in bucket '{self.vector_bucket}'")
         except ClientError as e:
             error_code = e.response.get("Error", {}).get("Code", "")
-            if error_code == "IndexAlreadyExists" and if_not_exists:
+            if error_code in {"ConflictException", "IndexAlreadyExists"} and if_not_exists:
                 logger.info(f"Index '{table_name}' already exists")
                 return
             raise Exception(f"Error creating index '{table_name}': {e}")
