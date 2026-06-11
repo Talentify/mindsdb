@@ -10,6 +10,8 @@ from mindsdb.utilities import log
 
 logger = log.getLogger(__name__)
 
+GITHUB_PULLS_UNAPPLIED_FILTER_SCAN_LIMIT = 500
+
 
 class GithubIssuesTable(APIResource):
     """The GitHub Issue Table implementation"""
@@ -272,6 +274,7 @@ class GithubPullRequestsTable(APIResource):
 
         if limit is None:
             limit = 20
+        requested_limit = limit
 
         issues_kwargs = {'state': 'all'}
 
@@ -293,6 +296,13 @@ class GithubPullRequestsTable(APIResource):
                 condition.applied = True
 
         repos = self.handler.get_repos(conditions)
+
+        has_unapplied_filters = any(not condition.applied for condition in conditions)
+        fetch_limit = (
+            max(requested_limit, GITHUB_PULLS_UNAPPLIED_FILTER_SCAN_LIMIT)
+            if has_unapplied_filters
+            else requested_limit
+        )
 
         data = []
         count = 0
@@ -351,9 +361,9 @@ class GithubPullRequestsTable(APIResource):
 
                 data.append(item)
                 count += 1
-                if limit <= count:
+                if fetch_limit <= count:
                     break
-            if limit <= count:
+            if fetch_limit <= count:
                 break
 
         return pd.DataFrame(data, columns=self.get_columns())
