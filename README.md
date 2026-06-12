@@ -1,8 +1,9 @@
-# MindsDB Query Engine
+<div align="center">
+
+  # MindsDB Query Engine
 
 **Semantic search over all your data — entirely in SQL.**
 
-<div>
   <a href="https://pypi.org/project/MindsDB/" target="_blank">
     <img src="https://badge.fury.io/py/MindsDB.svg" alt="PyPI version" />
   </a>
@@ -12,9 +13,9 @@
   <a href="https://hub.docker.com/r/mindsdb/mindsdb" target="_blank">
     <img src="https://img.shields.io/docker/pulls/mindsdb/mindsdb.svg?logo=docker&label=Docker%20pulls&cacheSeconds=86400" alt="Docker pulls" />
   </a>
-</div>
 
 [**Docs**](https://mindsdb.github.io/engine) · [**Website**](https://mindshub.ai) · [**Discord**](https://mindshub.ai/discord) · [**Contact**](https://mindshub.ai/contact)
+</div>
 
 ---
 
