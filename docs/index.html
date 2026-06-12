@@ -4,7 +4,40 @@
 <meta charset="utf-8">
 <meta name="google-site-verification" content="ENITI0G8QNlEov3S3z6z-sdzarZB0iGzogGnapIdFGY" />
 <meta name="viewport" content="width=device-width,initial-scale=1">
-<title>MindsDB SQL Reference</title>
+<title>MindsDB Query Engine — SQL Reference</title>
+<meta name="description" content="Build semantic search pipelines entirely in SQL: connect data sources live, index content into knowledge bases, run hybrid vector + keyword search.">
+<meta name="robots" content="index, follow">
+<meta name="theme-color" content="#070d19">
+<link rel="canonical" href="https://mindsdb.github.io/engine/">
+<meta property="og:title" content="MindsDB Query Engine — SQL Reference">
+<meta property="og:description" content="Build semantic search pipelines entirely in SQL: connect data sources live, index content into knowledge bases, run hybrid vector + keyword search.">
+<meta property="og:url" content="https://mindsdb.github.io/engine/">
+<meta property="og:type" content="website">
+<meta property="og:site_name" content="MindsDB Query Engine">
+<meta property="og:image" content="https://mindsdb.github.io/engine/og-image.png">
+<meta property="og:image:width" content="1200">
+<meta property="og:image:height" content="630">
+<meta property="og:image:alt" content="MindsDB Query Engine — Semantic Search via SQL">
+<meta name="twitter:card" content="summary_large_image">
+<meta name="twitter:title" content="MindsDB Query Engine — SQL Reference">
+<meta name="twitter:description" content="Build semantic search pipelines entirely in SQL: connect data sources live, index content into knowledge bases, run hybrid vector + keyword search.">
+<meta name="twitter:image" content="https://mindsdb.github.io/engine/og-image.png">
+<script type="application/ld+json">
+{
+  "@context": "https://schema.org",
+  "@type": "WebSite",
+  "name": "MindsDB Query Engine — SQL Reference",
+  "url": "https://mindsdb.github.io/engine/",
+  "description": "Build semantic search pipelines entirely in SQL: connect data sources live, index content into knowledge bases, run hybrid vector + keyword search.",
+  "about": {
+    "@type": "SoftwareApplication",
+    "name": "MindsDB Query Engine",
+    "applicationCategory": "DeveloperApplication",
+    "operatingSystem": "Linux, macOS, Windows",
+    "sameAs": "https://github.com/mindsdb/engine"
+  }
+}
+</script>
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
 <link href="https://cdnjs.cloudflare.com/ajax/libs/prism/1.29.0/themes/prism-tomorrow.min.css" rel="stylesheet">
@@ -510,7 +543,6 @@ td code{font-size:11.5px}
     <div class="nav-items open">
       <a class="nav-item" href="#setup-docker">Docker</a>
       <a class="nav-item" href="#setup-pip">pip install</a>
-      <a class="nav-item" href="#setup-cloud">Cloud</a>
       <a class="nav-item" href="#setup-clients">Connect Clients</a>
     </div>
   </div>
@@ -743,11 +775,6 @@ pip install mindsdb[pgvector,openai,postgres]</code></pre>
 <div class="pre-label"><span>BASH — start</span><button class="copy-btn" onclick="copyCode(this)">Copy</button></div>
 <pre><code class="language-bash">python -m mindsdb</code></pre>
 <p>Editor: <code>http://127.0.0.1:47334</code> &nbsp;·&nbsp; MySQL API: port <code>47335</code> &nbsp;·&nbsp; PostgreSQL API: port <code>47336</code></p>
-</section>
-
-<section id="setup-cloud" class="doc-section">
-<h2 class="anchor-heading"><a class="anchor-link" href="#setup-cloud">#</a> MindsDB Cloud</h2>
-<p>Sign up at <strong>cloud.mindsdb.com</strong> — no installation required. The SQL editor is available immediately. All SQL statements in this reference work identically on Cloud.</p>
 </section>
 
 <section id="setup-clients" class="doc-section">
