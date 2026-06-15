@@ -10,6 +10,7 @@ from .langsmith_tables import (
 
 DEFAULT_LIMIT = 100
 DEFAULT_SCAN_LIMIT = 1000
+DEFAULT_PROJECT_SCAN_LIMIT = 100
 
 
 class LangSmithHandler(APIHandler):
@@ -151,12 +152,36 @@ class LangSmithHandler(APIHandler):
         if native.get("query") is not None:
             kwargs["query"] = native["query"]
         kwargs["limit"] = fetch_limit
-        runs = list(client.list_runs(**kwargs))
+
         import pandas as pd
         rows = []
-        from .langsmith_tables import _run_row
-        for run in runs:
-            rows.append(_run_row(run))
+        from .langsmith_tables import _get, _run_row
+
+        scoped_run_query = any(
+            kwargs.get(key) is not None
+            for key in ("project_name", "project_id", "trace_id", "reference_example_id", "parent_run_id")
+        )
+
+        if scoped_run_query:
+            runs = list(client.list_runs(**kwargs))
+            for run in runs:
+                rows.append(_run_row(run, project_name=kwargs.get("project_name")))
+        else:
+            projects = list(client.list_projects(limit=DEFAULT_PROJECT_SCAN_LIMIT))
+            for project in projects:
+                project_name = _get(project, "name")
+                if not project_name:
+                    continue
+                remaining_limit = fetch_limit - len(rows)
+                if remaining_limit <= 0:
+                    break
+                project_kwargs = dict(kwargs)
+                project_kwargs["project_name"] = project_name
+                project_kwargs["limit"] = remaining_limit
+                for run in client.list_runs(**project_kwargs):
+                    rows.append(_run_row(run, project_name=project_name))
+                    if len(rows) >= fetch_limit:
+                        break
         return pd.DataFrame(rows, columns=self._tables["runs"].get_columns())
 
     def _list_threads(self, conditions, limit):
@@ -175,17 +200,68 @@ class LangSmithHandler(APIHandler):
         fetch_limit = self._fetch_limit(limit, bool(remaining))
         kwargs = dict(native)
         kwargs["limit"] = fetch_limit
-        threads = list(client.list_threads(**kwargs))
         import pandas as pd
-        from .langsmith_tables import _get, _json_dumps
+        from .langsmith_tables import _get, _json_dumps, _metadata_thread_id
+
+        if hasattr(client, "list_threads"):
+            threads = list(client.list_threads(**kwargs))
+            rows = []
+            for t in threads:
+                rows.append({
+                    "thread_id": _get(t, "thread_id", "id"),
+                    "run_count": _get(t, "run_count", "count"),
+                    "min_start_time": _get(t, "min_start_time"),
+                    "max_start_time": _get(t, "max_start_time"),
+                    "runs": _json_dumps(_get(t, "runs")),
+                })
+            return pd.DataFrame(rows, columns=self._tables["threads"].get_columns())
+
+        run_kwargs = {}
+        if native.get("project_name"):
+            run_kwargs["project_name"] = native["project_name"]
+        elif native.get("project_id"):
+            run_kwargs["project_id"] = native["project_id"]
+        if native.get("filter"):
+            run_kwargs["filter"] = native["filter"]
+        run_kwargs["is_root"] = True
+
+        project_names = [run_kwargs.get("project_name")] if run_kwargs.get("project_name") else []
+        if not project_names and not run_kwargs.get("project_id"):
+            project_names = [_get(project, "name") for project in client.list_projects(limit=DEFAULT_PROJECT_SCAN_LIMIT)]
+
+        grouped = {}
+        scan_sources = project_names or [None]
+        for project_name in scan_sources:
+            if project_name:
+                run_kwargs["project_name"] = project_name
+            run_kwargs["limit"] = fetch_limit
+            for run in client.list_runs(**run_kwargs):
+                metadata = _get(run, "extra", default={}) or {}
+                metadata = metadata.get("metadata") if isinstance(metadata, dict) else _get(metadata, "metadata")
+                thread_id = _metadata_thread_id(metadata)
+                if not thread_id:
+                    continue
+                item = grouped.setdefault(thread_id, {"runs": [], "count": 0, "min_start_time": None, "max_start_time": None})
+                start_time = _get(run, "start_time")
+                item["runs"].append({"id": _get(run, "id"), "name": _get(run, "name"), "project_name": project_name})
+                item["count"] += 1
+                if start_time is not None and (item["min_start_time"] is None or start_time < item["min_start_time"]):
+                    item["min_start_time"] = start_time
+                if start_time is not None and (item["max_start_time"] is None or start_time > item["max_start_time"]):
+                    item["max_start_time"] = start_time
+                if len(grouped) >= fetch_limit:
+                    break
+            if len(grouped) >= fetch_limit:
+                break
+
         rows = []
-        for t in threads:
+        for thread_id, thread in grouped.items():
             rows.append({
-                "thread_id": _get(t, "thread_id", "id"),
-                "run_count": _get(t, "run_count", "count"),
-                "min_start_time": _get(t, "min_start_time"),
-                "max_start_time": _get(t, "max_start_time"),
-                "runs": _json_dumps(_get(t, "runs")),
+                "thread_id": thread_id,
+                "run_count": thread["count"],
+                "min_start_time": thread["min_start_time"],
+                "max_start_time": thread["max_start_time"],
+                "runs": _json_dumps(thread["runs"]),
             })
         return pd.DataFrame(rows, columns=self._tables["threads"].get_columns())
 
@@ -217,7 +293,40 @@ class LangSmithHandler(APIHandler):
         if order is not None:
             kwargs["order"] = order
         kwargs["limit"] = fetch_limit
-        runs = list(client.read_thread(**kwargs))
         import pandas as pd
-        from .langsmith_tables import _thread_run_row
+        from .langsmith_tables import _get, _metadata_thread_id, _thread_run_row
+
+        if hasattr(client, "read_thread"):
+            runs = list(client.read_thread(**kwargs))
+        else:
+            run_kwargs = {"limit": fetch_limit}
+            if native.get("project_name"):
+                run_kwargs["project_name"] = native["project_name"]
+            elif native.get("project_id"):
+                run_kwargs["project_id"] = native["project_id"]
+            if native.get("filter"):
+                run_kwargs["filter"] = native["filter"]
+            if native.get("is_root") is not None:
+                run_kwargs["is_root"] = native["is_root"]
+
+            project_names = [run_kwargs.get("project_name")] if run_kwargs.get("project_name") else []
+            if not project_names and not run_kwargs.get("project_id"):
+                project_names = [_get(project, "name") for project in client.list_projects(limit=DEFAULT_PROJECT_SCAN_LIMIT)]
+
+            runs = []
+            for project_name in (project_names or [None]):
+                if project_name:
+                    run_kwargs["project_name"] = project_name
+                for run in client.list_runs(**run_kwargs):
+                    metadata = _get(run, "extra", default={}) or {}
+                    metadata = metadata.get("metadata") if isinstance(metadata, dict) else _get(metadata, "metadata")
+                    if _metadata_thread_id(metadata) == thread_id:
+                        runs.append(run)
+                        if len(runs) >= fetch_limit:
+                            break
+                if len(runs) >= fetch_limit:
+                    break
+
+            runs.sort(key=lambda run: _get(run, "start_time") or "", reverse=order == "desc")
+
         return pd.DataFrame([_thread_run_row(r, thread_id) for r in runs], columns=self._tables["thread_runs"].get_columns())

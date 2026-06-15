@@ -57,7 +57,13 @@ def _get(obj, *names, default=None):
     return default
 
 
-def _run_row(run):
+def _metadata_thread_id(metadata):
+    if isinstance(metadata, dict):
+        return metadata.get("thread_id") or metadata.get("session_id") or metadata.get("conversation_id")
+    return _get(metadata, "thread_id") or _get(metadata, "session_id") or _get(metadata, "conversation_id")
+
+
+def _run_row(run, project_name=None):
     extra = _get(run, "extra", default={}) or {}
     metadata = extra.get("metadata") if isinstance(extra, dict) else _get(extra, "metadata")
     start = _get(run, "start_time")
@@ -69,6 +75,8 @@ def _run_row(run):
         latency = latency.total_seconds()
     return {
         "id": _get(run, "id"), "name": _get(run, "name"), "run_type": _get(run, "run_type"),
+        "project_name": project_name,
+        "thread_id": _metadata_thread_id(metadata),
         "trace_id": _get(run, "trace_id"), "parent_run_id": _get(run, "parent_run_id"),
         "session_id": _get(run, "session_id"), "status": _get(run, "status"), "error": _get(run, "error"),
         "start_time": start, "end_time": end, "latency_seconds": latency,

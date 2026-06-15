@@ -77,6 +77,31 @@ class ManyRunsClient(FakeClient):
         ])
 
 
+class OldLangSmithClient:
+    def __init__(self):
+        self.list_projects_calls = []
+        self.list_runs_calls = []
+
+    def list_projects(self, **kwargs):
+        self.list_projects_calls.append(kwargs)
+        return iter([_Project(id="p1", name="demo")])
+
+    def list_runs(self, **kwargs):
+        self.list_runs_calls.append(kwargs)
+        return iter([
+            _Run(
+                id="r-old",
+                name="old run",
+                run_type="chain",
+                extra={"metadata": {"thread_id": "thread-old"}},
+                inputs={},
+                outputs={},
+                tags=[],
+                start_time=datetime(2026, 6, 1, tzinfo=timezone.utc),
+            )
+        ])
+
+
 def _handler(fake_client=None, connection_data=None):
     if connection_data is None:
         connection_data = {"project_name": "demo"}
@@ -198,6 +223,18 @@ def test_runs_keep_sql_limit_when_all_filters_are_native():
     assert fake.list_runs_calls[0]["limit"] == 20
 
 
+def test_runs_without_project_scans_projects_first():
+    fake = FakeClient()
+    h = _handler(fake, connection_data={})
+
+    df = h._tables["runs"].select(parse_sql("SELECT id, project_name FROM runs LIMIT 10"))
+
+    assert fake.list_projects_calls[0] == {"limit": 100}
+    assert fake.list_runs_calls[0]["project_name"] == "demo"
+    assert fake.list_runs_calls[0]["limit"] == 10
+    assert df.iloc[0]["project_name"] == "demo"
+
+
 def test_runs_support_complex_select_targets():
     h = _handler(FakeClient())
     df = h._tables["runs"].select(parse_sql("SELECT SUM(total_tokens) AS tokens FROM runs"))
@@ -267,6 +304,33 @@ def test_threads_flattening_and_thread_runs_require_thread_id():
     assert json.loads(threads.iloc[0]["runs"]) == [{"id": "r1"}]
     with pytest.raises(ValueError):
         h._tables["thread_runs"].list(conditions=[], limit=5)
+
+
+def test_threads_fallback_when_sdk_has_no_list_threads():
+    old_client = OldLangSmithClient()
+    h = _handler(old_client, connection_data={})
+
+    df = h._tables["threads"].select(parse_sql("SELECT thread_id, run_count FROM threads LIMIT 5"))
+
+    assert old_client.list_projects_calls[0] == {"limit": 100}
+    assert old_client.list_runs_calls[0]["project_name"] == "demo"
+    assert old_client.list_runs_calls[0]["is_root"] is True
+    assert df.iloc[0]["thread_id"] == "thread-old"
+    assert df.iloc[0]["run_count"] == 1
+
+
+def test_thread_runs_fallback_when_sdk_has_no_read_thread():
+    old_client = OldLangSmithClient()
+    h = _handler(old_client, connection_data={})
+
+    df = h._tables["thread_runs"].select(
+        parse_sql("SELECT thread_id, id FROM thread_runs WHERE thread_id = 'thread-old' LIMIT 5")
+    )
+
+    assert old_client.list_projects_calls[0] == {"limit": 100}
+    assert old_client.list_runs_calls[0]["project_name"] == "demo"
+    assert df.iloc[0]["thread_id"] == "thread-old"
+    assert df.iloc[0]["id"] == "r-old"
 
 
 def test_thread_runs_order_and_default_limit():
