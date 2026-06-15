@@ -90,6 +90,40 @@ def _thread_run_row(run, thread_id):
     return row
 
 
+def _project_row(project):
+    extra = _get(project, "extra", default={}) or {}
+    metadata = extra.get("metadata") if isinstance(extra, dict) else _get(extra, "metadata")
+    project_id = _get(project, "id")
+    return {
+        "id": project_id,
+        "project_id": project_id,
+        "name": _get(project, "name"),
+        "description": _get(project, "description"),
+        "start_time": _get(project, "start_time"),
+        "end_time": _get(project, "end_time"),
+        "tenant_id": _get(project, "tenant_id"),
+        "reference_dataset_id": _get(project, "reference_dataset_id"),
+        "extra": _json_dumps(extra),
+        "metadata": _json_dumps(metadata),
+        "run_count": _get(project, "run_count"),
+        "latency_p50": _get(project, "latency_p50"),
+        "latency_p99": _get(project, "latency_p99"),
+        "total_tokens": _get(project, "total_tokens"),
+        "prompt_tokens": _get(project, "prompt_tokens"),
+        "completion_tokens": _get(project, "completion_tokens"),
+        "last_run_start_time": _get(project, "last_run_start_time"),
+        "feedback_stats": _json_dumps(_get(project, "feedback_stats")),
+        "session_feedback_stats": _json_dumps(_get(project, "session_feedback_stats")),
+        "run_facets": _json_dumps(_get(project, "run_facets")),
+        "total_cost": _get(project, "total_cost"),
+        "prompt_cost": _get(project, "prompt_cost"),
+        "completion_cost": _get(project, "completion_cost"),
+        "first_token_p50": _get(project, "first_token_p50"),
+        "first_token_p99": _get(project, "first_token_p99"),
+        "error_rate": _get(project, "error_rate"),
+    }
+
+
 def _collect_identifiers(node, seen=None):
     if node is None:
         return set()
@@ -192,6 +226,20 @@ class LangSmithBaseTable(APIResource):
             result = result[: int(limit)]
 
         return result
+
+
+class LangSmithProjectsTable(LangSmithBaseTable):
+    pseudo_columns = {"name_contains", "reference_dataset_name", "reference_free", "include_stats", "dataset_version", "metadata"}
+
+    def list(self, conditions=None, limit=None, sort=None, targets=None, force_scan=False):
+        if force_scan and limit is None:
+            limit = DEFAULT_SCAN_LIMIT
+        elif force_scan:
+            limit = max(int(limit), DEFAULT_SCAN_LIMIT)
+        return self.handler._list_projects(conditions or [], limit)
+
+    def get_columns(self):
+        return list(_project_row({}).keys())
 
 
 class LangSmithRunsTable(LangSmithBaseTable):

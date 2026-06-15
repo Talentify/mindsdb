@@ -1,7 +1,12 @@
 from mindsdb.integrations.libs.api_handler import APIHandler
 from mindsdb.integrations.libs.response import HandlerStatusResponse
 from mindsdb.integrations.utilities.sql_utils import FilterOperator
-from .langsmith_tables import LangSmithRunsTable, LangSmithThreadsTable, LangSmithThreadRunsTable
+from .langsmith_tables import (
+    LangSmithProjectsTable,
+    LangSmithRunsTable,
+    LangSmithThreadsTable,
+    LangSmithThreadRunsTable,
+)
 
 DEFAULT_LIMIT = 100
 DEFAULT_SCAN_LIMIT = 1000
@@ -15,6 +20,7 @@ class LangSmithHandler(APIHandler):
         self.connection_data = kwargs.get("connection_data", {})
         self.client = None
         self.is_connected = False
+        self._register_table("projects", LangSmithProjectsTable(self))
         self._register_table("runs", LangSmithRunsTable(self))
         self._register_table("threads", LangSmithThreadsTable(self))
         self._register_table("thread_runs", LangSmithThreadRunsTable(self))
@@ -42,8 +48,9 @@ class LangSmithHandler(APIHandler):
         except Exception as e:
             return HandlerStatusResponse(False, str(e))
 
-    def _native_conditions(self, conditions, supported_ops, pseudo_columns=None):
+    def _native_conditions(self, conditions, supported_ops, pseudo_columns=None, boolean_columns=None):
         pseudo_columns = pseudo_columns or set()
+        boolean_columns = boolean_columns or {"is_root", "error"}
         native = {}
         remaining = []
         for c in conditions:
@@ -57,7 +64,7 @@ class LangSmithHandler(APIHandler):
                 remaining.append(c)
                 continue
 
-            if c.column in {"is_root", "error"} and not isinstance(c.value, bool):
+            if c.column in boolean_columns and not isinstance(c.value, bool):
                 if c.column in pseudo_columns:
                     raise ValueError(f"LangSmith parameter '{c.column}' requires a boolean value")
                 remaining.append(c)
@@ -72,6 +79,46 @@ class LangSmithHandler(APIHandler):
                 native[c.column] = c.value
                 c.applied = True
         return native, remaining
+
+    def _list_projects(self, conditions, limit):
+        client = self.connect()
+        eq = {FilterOperator.EQUAL}
+        supported = {
+            "project_id": eq,
+            "id": eq,
+            "name": eq,
+            "name_contains": eq,
+            "reference_dataset_id": eq,
+            "reference_dataset_name": eq,
+            "reference_free": eq,
+            "include_stats": eq,
+            "dataset_version": eq,
+            "metadata": eq,
+        }
+        pseudo = {"name_contains", "reference_dataset_name", "reference_free", "include_stats", "dataset_version", "metadata"}
+        native, remaining = self._native_conditions(
+            conditions,
+            supported,
+            pseudo_columns=pseudo,
+            boolean_columns={"reference_free", "include_stats"},
+        )
+
+        project_id = native.pop("project_id", None) or native.pop("id", None)
+        if project_id is not None:
+            native["project_ids"] = [project_id]
+
+        fetch_limit = self._fetch_limit(limit, bool(remaining))
+        native["limit"] = fetch_limit
+
+        import json
+        import pandas as pd
+        from .langsmith_tables import _project_row
+
+        if isinstance(native.get("metadata"), str):
+            native["metadata"] = json.loads(native["metadata"])
+
+        projects = list(client.list_projects(**native))
+        return pd.DataFrame([_project_row(project) for project in projects], columns=self._tables["projects"].get_columns())
 
     def _default_project_name(self, native):
         return native.get("project_name") or self.connection_data.get("project_name")

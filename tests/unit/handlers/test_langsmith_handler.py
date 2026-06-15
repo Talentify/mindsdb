@@ -29,12 +29,31 @@ class _Thread(SimpleNamespace):
     pass
 
 
+class _Project(SimpleNamespace):
+    pass
+
+
 class FakeClient:
     def __init__(self, **kwargs):
         self.kwargs = kwargs
         self.list_runs_calls = []
         self.list_threads_calls = []
+        self.list_projects_calls = []
         self.read_thread_calls = []
+
+    def list_projects(self, **kwargs):
+        self.list_projects_calls.append(kwargs)
+        return iter([
+            _Project(
+                id="p1",
+                name="demo",
+                description="Demo project",
+                extra={"metadata": {"team": "ai"}},
+                run_count=7,
+                total_tokens=123,
+                feedback_stats={"score": {"avg": 1}},
+            )
+        ])
 
     def list_runs(self, **kwargs):
         self.list_runs_calls.append(kwargs)
@@ -68,6 +87,58 @@ def _handler(fake_client=None, connection_data=None):
 
 def test_handler_metadata_import_without_sdk():
     assert LangSmithHandlerExport is not None
+
+
+def test_projects_table_is_registered_and_flattens_projects():
+    fake = FakeClient()
+    h = _handler(fake)
+
+    df = h._tables["projects"].select(parse_sql("SELECT id, name, run_count FROM projects LIMIT 10"))
+
+    assert fake.list_projects_calls[0]["limit"] == 10
+    assert df.iloc[0]["id"] == "p1"
+    assert df.iloc[0]["project_id"] == "p1"
+    assert df.iloc[0]["name"] == "demo"
+    assert df.iloc[0]["run_count"] == 7
+    assert json.loads(df.iloc[0]["metadata"]) == {"team": "ai"}
+    assert json.loads(df.iloc[0]["feedback_stats"]) == {"score": {"avg": 1}}
+
+
+def test_projects_translate_native_filters_and_mark_applied():
+    fake = FakeClient()
+    h = _handler(fake)
+
+    df = h._tables["projects"].select(
+        parse_sql("SELECT name FROM projects WHERE name_contains = 'prod' AND include_stats = true LIMIT 5")
+    )
+
+    assert fake.list_projects_calls[0]["name_contains"] == "prod"
+    assert fake.list_projects_calls[0]["include_stats"] is True
+    assert fake.list_projects_calls[0]["limit"] == 5
+    assert df.attrs["_applied_where_columns"] == {"name_contains", "include_stats"}
+
+
+def test_projects_project_id_maps_to_project_ids_param():
+    fake = FakeClient()
+    h = _handler(fake)
+
+    h._tables["projects"].select(parse_sql("SELECT name FROM projects WHERE project_id = 'p1' LIMIT 1"))
+
+    assert fake.list_projects_calls[0]["project_ids"] == ["p1"]
+
+
+def test_projects_include_stats_requires_boolean():
+    h = _handler(FakeClient())
+
+    with pytest.raises(ValueError, match="include_stats"):
+        h._tables["projects"].select(parse_sql("SELECT name FROM projects WHERE include_stats = 'true'"))
+
+
+def test_projects_complex_where_referencing_pseudo_param_raises():
+    h = _handler(FakeClient())
+
+    with pytest.raises(ValueError, match="include_stats"):
+        h._tables["projects"].select(parse_sql("SELECT name FROM projects WHERE include_stats = true OR name = 'demo'"))
 
 
 def test_runs_translate_params_and_mark_applied(monkeypatch):
