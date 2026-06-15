@@ -40,10 +40,7 @@ class LangSmithHandler(APIHandler):
     def check_connection(self):
         try:
             client = self.connect()
-            kwargs = {"limit": 1}
-            if self.connection_data.get("project_name"):
-                kwargs["project_name"] = self.connection_data["project_name"]
-            list(client.list_runs(**kwargs))
+            list(client.list_projects(limit=1))
             return HandlerStatusResponse(True)
         except Exception as e:
             return HandlerStatusResponse(False, str(e))

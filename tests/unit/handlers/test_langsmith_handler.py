@@ -89,6 +89,17 @@ def test_handler_metadata_import_without_sdk():
     assert LangSmithHandlerExport is not None
 
 
+def test_check_connection_uses_projects_so_project_name_is_optional():
+    fake = FakeClient()
+    h = _handler(fake, connection_data={})
+
+    status = h.check_connection()
+
+    assert status.success is True
+    assert fake.list_projects_calls[0] == {"limit": 1}
+    assert fake.list_runs_calls == []
+
+
 def test_projects_table_is_registered_and_flattens_projects():
     fake = FakeClient()
     h = _handler(fake)
