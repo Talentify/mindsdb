@@ -1,0 +1,332 @@
+from mindsdb.integrations.libs.api_handler import APIHandler
+from mindsdb.integrations.libs.response import HandlerStatusResponse
+from mindsdb.integrations.utilities.sql_utils import FilterOperator
+from .langsmith_tables import (
+    LangSmithProjectsTable,
+    LangSmithRunsTable,
+    LangSmithThreadsTable,
+    LangSmithThreadRunsTable,
+)
+
+DEFAULT_LIMIT = 100
+DEFAULT_SCAN_LIMIT = 1000
+DEFAULT_PROJECT_SCAN_LIMIT = 100
+
+
+class LangSmithHandler(APIHandler):
+    name = "langsmith"
+
+    def __init__(self, name, **kwargs):
+        super().__init__(name)
+        self.connection_data = kwargs.get("connection_data", {})
+        self.client = None
+        self.is_connected = False
+        self._register_table("projects", LangSmithProjectsTable(self))
+        self._register_table("runs", LangSmithRunsTable(self))
+        self._register_table("threads", LangSmithThreadsTable(self))
+        self._register_table("thread_runs", LangSmithThreadRunsTable(self))
+
+    def connect(self):
+        if self.is_connected:
+            return self.client
+        import langsmith
+        kw = {}
+        for k in ("api_key", "api_url", "workspace_id"):
+            if self.connection_data.get(k) is not None:
+                kw[k] = self.connection_data[k]
+        self.client = langsmith.Client(**kw)
+        self.is_connected = True
+        return self.client
+
+    def check_connection(self):
+        try:
+            client = self.connect()
+            list(client.list_projects(limit=1))
+            return HandlerStatusResponse(True)
+        except Exception as e:
+            return HandlerStatusResponse(False, str(e))
+
+    def _native_conditions(self, conditions, supported_ops, pseudo_columns=None, boolean_columns=None):
+        pseudo_columns = pseudo_columns or set()
+        boolean_columns = boolean_columns or {"is_root", "error"}
+        native = {}
+        remaining = []
+        for c in conditions:
+            if c.column not in supported_ops:
+                remaining.append(c)
+                continue
+
+            if c.op not in supported_ops[c.column]:
+                if c.column in pseudo_columns:
+                    raise ValueError(f"Unsupported operator {c.op.value} for LangSmith parameter '{c.column}'")
+                remaining.append(c)
+                continue
+
+            if c.column in boolean_columns and not isinstance(c.value, bool):
+                if c.column in pseudo_columns:
+                    raise ValueError(f"LangSmith parameter '{c.column}' requires a boolean value")
+                remaining.append(c)
+                continue
+
+            if c.column in native and native[c.column] != c.value:
+                raise ValueError(f"Multiple values for LangSmith parameter '{c.column}' are not supported")
+
+            if c.column in native:
+                c.applied = True
+            else:
+                native[c.column] = c.value
+                c.applied = True
+        return native, remaining
+
+    def _list_projects(self, conditions, limit):
+        client = self.connect()
+        eq = {FilterOperator.EQUAL}
+        supported = {
+            "project_id": eq,
+            "id": eq,
+            "name": eq,
+            "name_contains": eq,
+            "reference_dataset_id": eq,
+            "reference_dataset_name": eq,
+            "reference_free": eq,
+            "include_stats": eq,
+            "dataset_version": eq,
+            "metadata": eq,
+        }
+        pseudo = {"name_contains", "reference_dataset_name", "reference_free", "include_stats", "dataset_version", "metadata"}
+        native, remaining = self._native_conditions(
+            conditions,
+            supported,
+            pseudo_columns=pseudo,
+            boolean_columns={"reference_free", "include_stats"},
+        )
+
+        project_id = native.pop("project_id", None) or native.pop("id", None)
+        if project_id is not None:
+            native["project_ids"] = [project_id]
+
+        fetch_limit = self._fetch_limit(limit, bool(remaining))
+        native["limit"] = fetch_limit
+
+        import json
+        import pandas as pd
+        from .langsmith_tables import _project_row
+
+        if isinstance(native.get("metadata"), str):
+            native["metadata"] = json.loads(native["metadata"])
+
+        projects = list(client.list_projects(**native))
+        return pd.DataFrame([_project_row(project) for project in projects], columns=self._tables["projects"].get_columns())
+
+    def _default_project_name(self, native):
+        return native.get("project_name") or self.connection_data.get("project_name")
+
+    def _fetch_limit(self, limit, has_unapplied):
+        limit = DEFAULT_LIMIT if limit is None else int(limit)
+        return max(limit, DEFAULT_SCAN_LIMIT) if has_unapplied else limit
+
+    def _list_runs(self, conditions, limit):
+        client = self.connect()
+        eq = {FilterOperator.EQUAL}
+        supported = {
+            "project_name": eq,
+            "project_id": eq,
+            "run_type": eq,
+            "trace_id": eq,
+            "reference_example_id": eq,
+            "parent_run_id": eq,
+            "is_root": eq,
+            "error": eq,
+            "start_time": {FilterOperator.GREATER_THAN_OR_EQUAL},
+            "filter": eq,
+            "trace_filter": eq,
+            "tree_filter": eq,
+            "query": eq,
+        }
+        pseudo = {"project_name", "project_id", "is_root", "filter", "trace_filter", "tree_filter", "query"}
+        native, remaining = self._native_conditions(conditions, supported, pseudo_columns=pseudo)
+        if not native.get("project_name") and not native.get("project_id") and self.connection_data.get("project_name"):
+            native["project_name"] = self.connection_data["project_name"]
+        fetch_limit = self._fetch_limit(limit, bool(remaining))
+        kwargs = {k: v for k, v in native.items() if k != "query"}
+        if native.get("query") is not None:
+            kwargs["query"] = native["query"]
+        kwargs["limit"] = fetch_limit
+
+        import pandas as pd
+        rows = []
+        from .langsmith_tables import _get, _run_row
+
+        scoped_run_query = any(
+            kwargs.get(key) is not None
+            for key in ("project_name", "project_id", "trace_id", "reference_example_id", "parent_run_id")
+        )
+
+        if scoped_run_query:
+            runs = list(client.list_runs(**kwargs))
+            for run in runs:
+                rows.append(_run_row(run, project_name=kwargs.get("project_name")))
+        else:
+            projects = list(client.list_projects(limit=DEFAULT_PROJECT_SCAN_LIMIT))
+            for project in projects:
+                project_name = _get(project, "name")
+                if not project_name:
+                    continue
+                remaining_limit = fetch_limit - len(rows)
+                if remaining_limit <= 0:
+                    break
+                project_kwargs = dict(kwargs)
+                project_kwargs["project_name"] = project_name
+                project_kwargs["limit"] = remaining_limit
+                for run in client.list_runs(**project_kwargs):
+                    rows.append(_run_row(run, project_name=project_name))
+                    if len(rows) >= fetch_limit:
+                        break
+        return pd.DataFrame(rows, columns=self._tables["runs"].get_columns())
+
+    def _list_threads(self, conditions, limit):
+        client = self.connect()
+        eq = {FilterOperator.EQUAL}
+        supported = {
+            "project_name": eq,
+            "project_id": eq,
+            "filter": eq,
+            "start_time": {FilterOperator.GREATER_THAN_OR_EQUAL},
+        }
+        pseudo = {"project_name", "project_id", "filter", "start_time"}
+        native, remaining = self._native_conditions(conditions, supported, pseudo_columns=pseudo)
+        if not native.get("project_name") and not native.get("project_id") and self.connection_data.get("project_name"):
+            native["project_name"] = self.connection_data["project_name"]
+        fetch_limit = self._fetch_limit(limit, bool(remaining))
+        kwargs = dict(native)
+        kwargs["limit"] = fetch_limit
+        import pandas as pd
+        from .langsmith_tables import _get, _json_dumps, _metadata_thread_id
+
+        if hasattr(client, "list_threads"):
+            threads = list(client.list_threads(**kwargs))
+            rows = []
+            for t in threads:
+                rows.append({
+                    "thread_id": _get(t, "thread_id", "id"),
+                    "run_count": _get(t, "run_count", "count"),
+                    "min_start_time": _get(t, "min_start_time"),
+                    "max_start_time": _get(t, "max_start_time"),
+                    "runs": _json_dumps(_get(t, "runs")),
+                })
+            return pd.DataFrame(rows, columns=self._tables["threads"].get_columns())
+
+        run_kwargs = {}
+        if native.get("project_name"):
+            run_kwargs["project_name"] = native["project_name"]
+        elif native.get("project_id"):
+            run_kwargs["project_id"] = native["project_id"]
+        if native.get("filter"):
+            run_kwargs["filter"] = native["filter"]
+        run_kwargs["is_root"] = True
+
+        project_names = [run_kwargs.get("project_name")] if run_kwargs.get("project_name") else []
+        if not project_names and not run_kwargs.get("project_id"):
+            project_names = [_get(project, "name") for project in client.list_projects(limit=DEFAULT_PROJECT_SCAN_LIMIT)]
+
+        grouped = {}
+        scan_sources = project_names or [None]
+        for project_name in scan_sources:
+            if project_name:
+                run_kwargs["project_name"] = project_name
+            run_kwargs["limit"] = fetch_limit
+            for run in client.list_runs(**run_kwargs):
+                metadata = _get(run, "extra", default={}) or {}
+                metadata = metadata.get("metadata") if isinstance(metadata, dict) else _get(metadata, "metadata")
+                thread_id = _metadata_thread_id(metadata)
+                if not thread_id:
+                    continue
+                item = grouped.setdefault(thread_id, {"runs": [], "count": 0, "min_start_time": None, "max_start_time": None})
+                start_time = _get(run, "start_time")
+                item["runs"].append({"id": _get(run, "id"), "name": _get(run, "name"), "project_name": project_name})
+                item["count"] += 1
+                if start_time is not None and (item["min_start_time"] is None or start_time < item["min_start_time"]):
+                    item["min_start_time"] = start_time
+                if start_time is not None and (item["max_start_time"] is None or start_time > item["max_start_time"]):
+                    item["max_start_time"] = start_time
+                if len(grouped) >= fetch_limit:
+                    break
+            if len(grouped) >= fetch_limit:
+                break
+
+        rows = []
+        for thread_id, thread in grouped.items():
+            rows.append({
+                "thread_id": thread_id,
+                "run_count": thread["count"],
+                "min_start_time": thread["min_start_time"],
+                "max_start_time": thread["max_start_time"],
+                "runs": _json_dumps(thread["runs"]),
+            })
+        return pd.DataFrame(rows, columns=self._tables["threads"].get_columns())
+
+    def _list_thread_runs(self, conditions, limit):
+        client = self.connect()
+        thread_id = next((c.value for c in conditions if c.column == "thread_id" and c.op == FilterOperator.EQUAL), None)
+        if not thread_id:
+            raise ValueError("WHERE thread_id = '...' is required for thread_runs")
+        eq = {FilterOperator.EQUAL}
+        supported = {"thread_id": eq, "project_name": eq, "project_id": eq, "filter": eq, "is_root": eq}
+        unsupported_order = next((c for c in conditions if c.column == "order" and c.op != FilterOperator.EQUAL), None)
+        if unsupported_order is not None:
+            raise ValueError("thread_runs order only supports equality")
+        order_condition = next((c for c in conditions if c.column == "order" and c.op == FilterOperator.EQUAL), None)
+        order = None
+        if order_condition is not None:
+            if order_condition.value not in ("asc", "desc"):
+                raise ValueError("thread_runs order must be 'asc' or 'desc'")
+            order = order_condition.value
+            order_condition.applied = True
+        pseudo = {"thread_id", "project_name", "project_id", "filter", "is_root"}
+        native, remaining = self._native_conditions(conditions, supported, pseudo_columns=pseudo)
+        if order_condition in remaining:
+            remaining.remove(order_condition)
+        if not native.get("project_name") and not native.get("project_id") and self.connection_data.get("project_name"):
+            native["project_name"] = self.connection_data["project_name"]
+        fetch_limit = self._fetch_limit(limit, bool(remaining))
+        kwargs = dict(native)
+        if order is not None:
+            kwargs["order"] = order
+        kwargs["limit"] = fetch_limit
+        import pandas as pd
+        from .langsmith_tables import _get, _metadata_thread_id, _thread_run_row
+
+        if hasattr(client, "read_thread"):
+            runs = list(client.read_thread(**kwargs))
+        else:
+            run_kwargs = {"limit": fetch_limit}
+            if native.get("project_name"):
+                run_kwargs["project_name"] = native["project_name"]
+            elif native.get("project_id"):
+                run_kwargs["project_id"] = native["project_id"]
+            if native.get("filter"):
+                run_kwargs["filter"] = native["filter"]
+            if native.get("is_root") is not None:
+                run_kwargs["is_root"] = native["is_root"]
+
+            project_names = [run_kwargs.get("project_name")] if run_kwargs.get("project_name") else []
+            if not project_names and not run_kwargs.get("project_id"):
+                project_names = [_get(project, "name") for project in client.list_projects(limit=DEFAULT_PROJECT_SCAN_LIMIT)]
+
+            runs = []
+            for project_name in (project_names or [None]):
+                if project_name:
+                    run_kwargs["project_name"] = project_name
+                for run in client.list_runs(**run_kwargs):
+                    metadata = _get(run, "extra", default={}) or {}
+                    metadata = metadata.get("metadata") if isinstance(metadata, dict) else _get(metadata, "metadata")
+                    if _metadata_thread_id(metadata) == thread_id:
+                        runs.append(run)
+                        if len(runs) >= fetch_limit:
+                            break
+                if len(runs) >= fetch_limit:
+                    break
+
+            runs.sort(key=lambda run: _get(run, "start_time") or "", reverse=order == "desc")
+
+        return pd.DataFrame([_thread_run_row(r, thread_id) for r in runs], columns=self._tables["thread_runs"].get_columns())

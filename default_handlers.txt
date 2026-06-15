@@ -26,6 +26,7 @@ google_calendar
 google_fit
 hackernews
 hubspot
+langsmith
 linkedin_ads
 intercom
 jira
