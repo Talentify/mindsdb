@@ -100,6 +100,45 @@ def _pattern_a_columns(query, all_columns):
     return selected if selected else list(all_columns)
 
 
+def _limit_value(query):
+    """Return the integer LIMIT value from the query, or None.
+
+    The planner forwards LIMIT to the handler (plan_api_db_select) and clears it
+    from the outer SubSelectStep, so the handler is solely responsible for
+    honoring it — DuckDB will not.
+    """
+    if query.limit is None:
+        return None
+    return query.limit.value if hasattr(query.limit, 'value') else query.limit
+
+
+def _all_conditions_pushable(conditions, col_map) -> bool:
+    """True if every WHERE condition is a simple comparison pushed to GAQL.
+
+    When this holds, the GAQL result is already fully filtered, so it is safe to
+    apply LIMIT in the handler (push to GAQL and/or slice the DataFrame). If any
+    condition is left for DuckDB (LIKE, OR, IS NULL, ...), limiting in the handler
+    could under-return after DuckDB re-filters, so we must not.
+    """
+    safe_ops = {'=', '!=', '<', '<=', '>', '>='}
+    for cond in conditions:
+        if not isinstance(cond, list) or len(cond) != 3:
+            return False
+        op, col, _ = cond
+        if op not in safe_ops or col not in col_map:
+            return False
+    return True
+
+
+def _finalize(query, df, all_columns, can_limit):
+    """Select requested columns and apply LIMIT when it is safe to do so."""
+    df = df[_pattern_a_columns(query, all_columns)]
+    limit = _limit_value(query)
+    if can_limit and limit is not None:
+        df = df.head(limit)
+    return df
+
+
 def _enum_name(val) -> str:
     """Convert a proto-plus enum value to its string name, or return as-is."""
     if val is None:
@@ -154,6 +193,11 @@ class CampaignsTable(APITable):
         if push_filters:
             gaql += " WHERE " + " AND ".join(push_filters)
 
+        can_limit = _all_conditions_pushable(conditions, _CAMPAIGNS_FILTER_MAP)
+        limit = _limit_value(query)
+        if can_limit and limit is not None:
+            gaql += f" LIMIT {limit}"
+
         logger.debug(f"CampaignsTable GAQL: {gaql}")
 
         ga_service = self.handler.client.get_service("GoogleAdsService")
@@ -175,7 +219,7 @@ class CampaignsTable(APITable):
             })
 
         df = pd.DataFrame(rows, columns=self.get_columns()) if rows else pd.DataFrame(columns=self.get_columns())
-        return df[_pattern_a_columns(query, self.get_columns())]
+        return _finalize(query, df, self.get_columns(), can_limit)
 
 
 # ---------------------------------------------------------------------------
@@ -221,6 +265,11 @@ class AdGroupsTable(APITable):
         if push_filters:
             gaql += " WHERE " + " AND ".join(push_filters)
 
+        can_limit = _all_conditions_pushable(conditions, _AD_GROUPS_FILTER_MAP)
+        limit = _limit_value(query)
+        if can_limit and limit is not None:
+            gaql += f" LIMIT {limit}"
+
         logger.debug(f"AdGroupsTable GAQL: {gaql}")
 
         ga_service = self.handler.client.get_service("GoogleAdsService")
@@ -241,7 +290,7 @@ class AdGroupsTable(APITable):
             })
 
         df = pd.DataFrame(rows, columns=self.get_columns()) if rows else pd.DataFrame(columns=self.get_columns())
-        return df[_pattern_a_columns(query, self.get_columns())]
+        return _finalize(query, df, self.get_columns(), can_limit)
 
 
 # ---------------------------------------------------------------------------
@@ -291,6 +340,11 @@ class AdsTable(APITable):
         if push_filters:
             gaql += " WHERE " + " AND ".join(push_filters)
 
+        can_limit = _all_conditions_pushable(conditions, _ADS_FILTER_MAP)
+        limit = _limit_value(query)
+        if can_limit and limit is not None:
+            gaql += f" LIMIT {limit}"
+
         logger.debug(f"AdsTable GAQL: {gaql}")
 
         ga_service = self.handler.client.get_service("GoogleAdsService")
@@ -321,7 +375,7 @@ class AdsTable(APITable):
             })
 
         df = pd.DataFrame(rows, columns=self.get_columns()) if rows else pd.DataFrame(columns=self.get_columns())
-        return df[_pattern_a_columns(query, self.get_columns())]
+        return _finalize(query, df, self.get_columns(), can_limit)
 
 
 # ---------------------------------------------------------------------------
@@ -372,6 +426,11 @@ class KeywordsTable(APITable):
         if push_filters:
             gaql += " AND " + " AND ".join(push_filters)
 
+        can_limit = _all_conditions_pushable(conditions, _KEYWORDS_FILTER_MAP)
+        limit = _limit_value(query)
+        if can_limit and limit is not None:
+            gaql += f" LIMIT {limit}"
+
         logger.debug(f"KeywordsTable GAQL: {gaql}")
 
         ga_service = self.handler.client.get_service("GoogleAdsService")
@@ -392,7 +451,7 @@ class KeywordsTable(APITable):
             })
 
         df = pd.DataFrame(rows, columns=self.get_columns()) if rows else pd.DataFrame(columns=self.get_columns())
-        return df[_pattern_a_columns(query, self.get_columns())]
+        return _finalize(query, df, self.get_columns(), can_limit)
 
 
 # ---------------------------------------------------------------------------
@@ -454,6 +513,11 @@ class CampaignPerformanceTable(APITable):
         if push_filters:
             gaql += " AND " + " AND ".join(push_filters)
 
+        can_limit = _all_conditions_pushable(other_conditions, _PERF_FILTER_MAP)
+        limit = _limit_value(query)
+        if can_limit and limit is not None:
+            gaql += f" LIMIT {limit}"
+
         logger.debug(f"CampaignPerformanceTable GAQL: {gaql}")
 
         ga_service = self.handler.client.get_service("GoogleAdsService")
@@ -477,7 +541,7 @@ class CampaignPerformanceTable(APITable):
             })
 
         df = pd.DataFrame(rows, columns=self.get_columns()) if rows else pd.DataFrame(columns=self.get_columns())
-        return df[_pattern_a_columns(query, self.get_columns())]
+        return _finalize(query, df, self.get_columns(), can_limit)
 
 
 # ---------------------------------------------------------------------------
@@ -538,6 +602,11 @@ class SearchTermsTable(APITable):
         if push_filters:
             gaql += " AND " + " AND ".join(push_filters)
 
+        can_limit = _all_conditions_pushable(other_conditions, _SEARCH_TERMS_FILTER_MAP)
+        limit = _limit_value(query)
+        if can_limit and limit is not None:
+            gaql += f" LIMIT {limit}"
+
         logger.debug(f"SearchTermsTable GAQL: {gaql}")
 
         ga_service = self.handler.client.get_service("GoogleAdsService")
@@ -562,7 +631,7 @@ class SearchTermsTable(APITable):
             })
 
         df = pd.DataFrame(rows, columns=self.get_columns()) if rows else pd.DataFrame(columns=self.get_columns())
-        return df[_pattern_a_columns(query, self.get_columns())]
+        return _finalize(query, df, self.get_columns(), can_limit)
 
 
 # ---------------------------------------------------------------------------
@@ -587,7 +656,7 @@ class LanguagesTable(APITable):
 
     def select(self, query: ast.Select) -> pd.DataFrame:
         df = self.handler.get_languages_cache()
-        return df[_pattern_a_columns(query, self.get_columns())]
+        return _finalize(query, df, self.get_columns(), query.where is None)
 
 
 # ---------------------------------------------------------------------------
@@ -614,7 +683,7 @@ class GeoTargetsTable(APITable):
 
     def select(self, query: ast.Select) -> pd.DataFrame:
         df = self.handler.get_geo_targets_cache()
-        return df[_pattern_a_columns(query, self.get_columns())]
+        return _finalize(query, df, self.get_columns(), query.where is None)
 
 
 # ---------------------------------------------------------------------------
@@ -683,7 +752,7 @@ class KeywordIdeasTable(APITable):
 
     def select(self, query: ast.Select) -> pd.DataFrame:
         self.handler.connect()
-        params, _ = _extract_keyword_planner_params(query.where)
+        params, other = _extract_keyword_planner_params(query.where)
 
         seed_keywords = params.get('keywords')
         seed_url = params.get('url')
@@ -743,7 +812,7 @@ class KeywordIdeasTable(APITable):
             })
 
         df = pd.DataFrame(rows, columns=self.get_columns()) if rows else pd.DataFrame(columns=self.get_columns())
-        return df[_pattern_a_columns(query, self.get_columns())]
+        return _finalize(query, df, self.get_columns(), not other)
 
 
 # ---------------------------------------------------------------------------
@@ -777,7 +846,7 @@ class KeywordHistoricalMetricsTable(APITable):
 
     def select(self, query: ast.Select) -> pd.DataFrame:
         self.handler.connect()
-        params, _ = _extract_keyword_planner_params(query.where)
+        params, other = _extract_keyword_planner_params(query.where)
 
         seed_keywords = params.get('keywords')
         if not seed_keywords:
@@ -823,7 +892,7 @@ class KeywordHistoricalMetricsTable(APITable):
             })
 
         df = pd.DataFrame(rows, columns=self.get_columns()) if rows else pd.DataFrame(columns=self.get_columns())
-        return df[_pattern_a_columns(query, self.get_columns())]
+        return _finalize(query, df, self.get_columns(), not other)
 
 
 # ---------------------------------------------------------------------------
@@ -867,7 +936,7 @@ class KeywordForecastMetricsTable(APITable):
 
     def select(self, query: ast.Select) -> pd.DataFrame:
         self.handler.connect()
-        params, _ = _extract_keyword_planner_params(query.where)
+        params, other = _extract_keyword_planner_params(query.where)
 
         seed_keywords = params.get('keywords')
         max_cpc = params.get('max_cpc_bid_micros')
@@ -962,4 +1031,4 @@ class KeywordForecastMetricsTable(APITable):
             })
 
         df = pd.DataFrame(rows, columns=self.get_columns()) if rows else pd.DataFrame(columns=self.get_columns())
-        return df[_pattern_a_columns(query, self.get_columns())]
+        return _finalize(query, df, self.get_columns(), not other)
