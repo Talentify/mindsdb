@@ -1115,12 +1115,27 @@ class GithubPagesBuildsTable(APIResource):
 
 class GithubFilesTable(APIResource):
 
-    def get_path(self, repo, path, file_matches=None, file_not_matches=None, limit=None):
+    def get_path(
+        self,
+        repo,
+        path,
+        file_matches=None,
+        file_not_matches=None,
+        limit=None,
+        include_content=True,
+    ):
 
         res = []
         for item in list(repo.get_contents(path)):
             if item.type == "dir":
-                subres = self.get_path(repo, item.path, file_matches, file_not_matches, limit)
+                subres = self.get_path(
+                    repo,
+                    item.path,
+                    file_matches,
+                    file_not_matches,
+                    limit,
+                    include_content,
+                )
                 res.extend(subres)
                 limit -= len(subres)
             else:
@@ -1141,8 +1156,17 @@ class GithubFilesTable(APIResource):
                     file = {
                         'path': item.path,
                         'name': item.name,
-                        'content': item.decoded_content,
                     }
+                    if include_content:
+                        try:
+                            file['content'] = item.decoded_content
+                        except AssertionError as exc:
+                            logger.warning(
+                                "Could not decode GitHub file content for %s: %s",
+                                item.path,
+                                exc,
+                            )
+                            file['content'] = None
                     res.append(file)
                     limit -= 1
             if limit <= 0:
@@ -1187,9 +1211,18 @@ class GithubFilesTable(APIResource):
         if len(file_not_matches) == 0:
             file_not_matches = None
 
+        include_content = not targets or 'content' in targets
+
         all_res = []
         for repo in repos:
-            res = self.get_path(repo, path, file_matches, file_not_matches, limit - len(all_res))
+            res = self.get_path(
+                repo,
+                path,
+                file_matches,
+                file_not_matches,
+                limit - len(all_res),
+                include_content,
+            )
             for item in res:
                 item["repository"] = repo.full_name
             all_res.extend(res)
