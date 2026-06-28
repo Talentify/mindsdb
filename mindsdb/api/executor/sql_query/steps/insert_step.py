@@ -1,7 +1,8 @@
 from mindsdb_sql_parser.ast import Identifier, Function
 
 from mindsdb.api.executor.planner.steps import SaveToTable, InsertToTable, CreateTableStep
-from mindsdb.api.executor.sql_query.result_set import ResultSet, Column
+from mindsdb.api.executor.sql_query.result_set import ResultSet
+from mindsdb.utilities.types.column import Column
 from mindsdb.utilities.exception import EntityNotExistsError
 from mindsdb.api.executor.exceptions import NotSupportedYet, LogicError
 from mindsdb.integrations.libs.response import INF_SCHEMA_COLUMNS_NAMES
@@ -100,10 +101,6 @@ class InsertToTableCall(BaseStepCall):
         response = dn.create_table(
             table_name=table_name, result_set=data, is_replace=is_replace, is_create=is_create, params=step.params
         )
-        if response.data_frame is not None:
-            cols = [Column(name=col_name) for col_name in response.data_frame.columns]
-            values = response.data_frame.values.tolist()
-            return ResultSet(affected_rows=response.affected_rows, columns=cols, values=values)
         return ResultSet(affected_rows=response.affected_rows)
 
 

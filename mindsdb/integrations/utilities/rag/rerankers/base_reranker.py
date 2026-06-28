@@ -1,13 +1,12 @@
 from __future__ import annotations
 
 import re
+import os
 import json
+import math
 import asyncio
 import logging
-import math
-import os
 import random
-from abc import ABC
 from typing import Any, List, Optional, Tuple
 
 from openai import AsyncOpenAI, AsyncAzureOpenAI
@@ -35,7 +34,11 @@ from mindsdb.integrations.utilities.rag.settings import (
     DEFAULT_VALID_CLASS_TOKENS,
     RerankerMode,
 )
-from mindsdb.integrations.libs.base import BaseMLEngine
+
+from mindsdb.interfaces.knowledge_base.providers.bedrock import AsyncBedrockClient
+from mindsdb.interfaces.knowledge_base.providers.gemini import GeminiClient
+from mindsdb.interfaces.knowledge_base.providers.snowflake import SnowflakeClient
+
 
 log = logging.getLogger(__name__)
 
@@ -50,7 +53,7 @@ def get_event_loop():
     return loop
 
 
-class BaseLLMReranker(BaseModel, ABC):
+class BaseLLMReranker(BaseModel):
     filtering_threshold: float = 0.0  # Default threshold for filtering
     provider: str = "openai"
     model: str = DEFAULT_RERANKING_MODEL  # Model to use for reranking
@@ -59,10 +62,10 @@ class BaseLLMReranker(BaseModel, ABC):
     base_url: Optional[str] = None
     api_version: Optional[str] = None
     num_docs_to_keep: Optional[int] = None  # How many of the top documents to keep after reranking & compressing.
-    method: str = "multi-class"  # Scoring method: 'multi-class' or 'binary'
+    method: str = "no-logprobs"  # Scoring method: 'multi-class' or 'no-logprobs'
     mode: RerankerMode = RerankerMode.POINTWISE
     _api_key_var: str = "OPENAI_API_KEY"
-    client: Optional[AsyncOpenAI | BaseMLEngine] = None
+    client: Optional[AsyncOpenAI | AsyncBedrockClient | GeminiClient | SnowflakeClient] = None
     _semaphore: Optional[asyncio.Semaphore] = None
     max_concurrent_requests: int = 20
     max_retries: int = 4
@@ -102,6 +105,9 @@ class BaseLLMReranker(BaseModel, ABC):
 
     def _init_client(self):
         if self.client is None:
+            if self.provider == "google":
+                self.provider = "gemini"
+
             if self.provider == "azure_openai":
                 azure_api_key = self.api_key or os.getenv("AZURE_OPENAI_API_KEY")
                 azure_api_endpoint = self.base_url or os.environ.get("AZURE_OPENAI_ENDPOINT")
@@ -113,11 +119,21 @@ class BaseLLMReranker(BaseModel, ABC):
                     timeout=self.request_timeout,
                     max_retries=2,
                 )
+                self.method = "multi-class"
+            elif self.provider == "bedrock":
+                kwargs = self.model_extra.copy()
+                self.client = AsyncBedrockClient(**kwargs)
+            elif self.provider == "gemini":
+                self.client = GeminiClient(api_key=self.api_key)
+            elif self.provider == "snowflake":
+                kwargs = self.model_extra.copy()
+                self.client = SnowflakeClient(api_key=self.api_key, **kwargs)
             elif self.provider in ("openai", "ollama"):
                 if self.provider == "ollama":
-                    self.method = "no-logprobs"
                     if self.api_key is None:
                         self.api_key = "n/a"
+                else:
+                    self.method = "multi-class"
 
                 api_key_var: str = "OPENAI_API_KEY"
                 openai_api_key = self.api_key or os.getenv(api_key_var)
@@ -157,24 +173,15 @@ class BaseLLMReranker(BaseModel, ABC):
                 self.method = "no-logprobs"
 
             else:
-                # try to use litellm
-                from mindsdb.api.executor.controllers.session_controller import SessionController
+                raise NotImplementedError(f'Provider "{self.provider}" is not supported')
 
-                session = SessionController()
-                module = session.integration_controller.get_handler_module("litellm")
-
-                if module is None or module.Handler is None:
-                    raise ValueError(f'Unable to use "{self.provider}" provider. Litellm handler is not installed')
-
-                self.client = module.Handler
-                self.method = "no-logprobs"
-
-    async def _call_llm(self, messages):
+    async def _call_llm(self, messages) -> str:
         if self.provider in ("azure_openai", "openai", "ollama"):
-            return await self.client.chat.completions.create(
+            response = await self.client.chat.completions.create(
                 model=self.model,
                 messages=messages,
             )
+            return response.choices[0].message.content
         elif self.provider in ("google", "google_genai"):
             # Convert OpenAI message format to Google Gen AI prompt format
             prompt_parts = []
@@ -228,12 +235,7 @@ class BaseLLMReranker(BaseModel, ABC):
 
                 return CompletionResponse(response.text)
         else:
-            kwargs = self.model_extra.copy()
-
-            if self.api_key is not None:
-                kwargs["api_key"] = self.api_key
-
-            return await self.client.acompletion(self.provider, model=self.model, messages=messages, args=kwargs)
+            return await self.client.acompletion(model_name=self.model, messages=messages)
 
     async def _rank(self, query_document_pairs: List[Tuple[str, str]], rerank_callback=None) -> List[Tuple[str, float]]:
         ranked_results = []
@@ -314,7 +316,7 @@ class BaseLLMReranker(BaseModel, ABC):
             temperature=self.temperature,
             n=1,
             logprobs=True,
-            max_tokens=1,
+            max_completion_tokens=1,
         )
 
         # Extract response and logprobs
@@ -344,11 +346,9 @@ class BaseLLMReranker(BaseModel, ABC):
             f"Search query: {query}"
         )
 
-        response = await self._call_llm(
+        answer = await self._call_llm(
             messages=[{"role": "system", "content": prompt}, {"role": "user", "content": document}],
         )
-
-        answer = response.choices[0].message.content
 
         try:
             value = re.findall(r"[\d]+", answer)[0]
@@ -462,7 +462,7 @@ class BaseLLMReranker(BaseModel, ABC):
             n=self.n,
             logprobs=self.logprobs,
             top_logprobs=self.top_logprobs,
-            max_tokens=self.max_tokens,
+            max_completion_tokens=self.max_tokens,
         )
 
         # Extract response and logprobs
@@ -610,8 +610,8 @@ class ListwiseLLMReranker(BaseLLMReranker):
 
         for attempt in range(self.max_retries):
             try:
-                response = await self._call_llm(messages)
-                content = response.choices[0].message.content
+                content = await self._call_llm(messages)
+
                 scores = self._extract_scores(content, len(documents))
                 return list(zip(documents, scores))
             except Exception as exc:

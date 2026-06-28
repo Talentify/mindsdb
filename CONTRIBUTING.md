@@ -2,7 +2,7 @@
 
 Being part of the core MindsDB team is accessible to anyone who is motivated and wants to be part of that journey!
 
-Please see below how to contribute to the project, also refer to the contributing documentation.
+Please see below how to contribute to the project.
 
 ## How can you help us?
 
@@ -27,7 +27,7 @@ In general, we follow the "fork-and-pull" Git workflow.
 > NOTE: Be sure to merge the latest from "upstream" before making a pull request! Also, make the PR to the `main` branch.
 
 ## Feature and Bug reports
-We use GitHub issues to track bugs and features. Report them by opening a [new issue](https://github.com/mindsdb/mindsdb/issues/new/choose) and fill out all of the required inputs.
+We use GitHub issues to track bugs and features. Report them by opening a [new issue](https://github.com/mindsdb/engine/issues) and fill out all of the required inputs.
 
 ## Code review process
 
@@ -35,12 +35,10 @@ The Pull Request reviews are done on a regular basis. Please, make sure you resp
 
 ## Community
 
-If you have additional questions or you want to chat with the MindsDB core team, please join our [Slack community](https://mindsdb.com/joincommunity) or post at [Github Discussions](https://github.com/mindsdb/mindsdb/discussions).
- 
-To get updates on MindsDB’s latest announcements, releases, and events, sign up for our [Monthly Community Newsletter](https://mindsdb.com/newsletter/?utm_medium=community&utm_source=github&utm_campaign=mindsdb%20repo).
+If you have additional questions or you want to chat with the MindsDB core team, please join our [Discord](https://mindshub.ai/discord) or open a [GitHub issue](https://github.com/mindsdb/engine/issues).
 
-Join our mission of democratizing machine learning!
+Join our mission of making semantic search accessible to everyone who knows SQL!
 
 ## Contributor Code of Conduct
-Please note that this project is released with a [Contributor Code of Conduct](https://github.com/mindsdb/mindsdb/blob/main/CODE_OF_CONDUCT.md). By participating in this project, you agree to abide by its terms.
+Please note that this project is released with a [Contributor Code of Conduct](CODE_OF_CONDUCT.md). By participating in this project, you agree to abide by its terms.
 
