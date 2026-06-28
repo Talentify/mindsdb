@@ -18,8 +18,6 @@ COPY mindsdb/__about__.py mindsdb/
 # Which will mean the next stage can be cached, even if the cache for the above stage was invalidated.
 
 
-
-
 # Use the stage from above to install our deps with as much caching as possible
 FROM python:3.10-slim AS build
 WORKDIR /mindsdb
@@ -56,7 +54,7 @@ COPY --from=deps /mindsdb .
 # - and finally declare `/mindsdb` as the target dir.
 ENV UV_LINK_MODE=copy \
     UV_PYTHON_DOWNLOADS=never \
-    UV_PYTHON=python3.10 \
+    UV_PYTHON=python3.10.20 \
     UV_PROJECT_ENVIRONMENT=/mindsdb \
     VIRTUAL_ENV=/venv \
     PATH=/venv/bin:$PATH
@@ -71,6 +69,13 @@ RUN --mount=type=cache,target=/root/.cache \
 
 
 FROM build AS extras
+
+# Apply latest security patches so the final image picks up fixes
+# even when the build stage layers are cached
+RUN --mount=target=/var/lib/apt,type=cache,sharing=locked \
+    --mount=target=/var/cache/apt,type=cache,sharing=locked \
+    apt-get update -qy && apt-get upgrade -qy
+
 ARG EXTRAS
 # Install extras on top of the bare mindsdb
 # The torch index is provided for "-cpu" images which install the cpu-only version of torch
@@ -93,8 +98,10 @@ ENV PATH=/venv/bin:$PATH
 EXPOSE 47334/tcp
 EXPOSE 47335/tcp
 
-# Pre-load tokenizer from Huggingface, and UI
-RUN python -m mindsdb --config=/root/mindsdb_config.json --load-tokenizer --update-gui
+HEALTHCHECK --interval=30s --timeout=10s --retries=5 --start-period=60s CMD curl -fsS "http://localhost:47334/api/status"
+
+# Pre-load web GUI
+RUN python -m mindsdb --config=/root/mindsdb_config.json --update-gui
 
 # Same as extras image, but with dev dependencies installed.
 # This image is used in our docker-compose and for local development with volume mounting
