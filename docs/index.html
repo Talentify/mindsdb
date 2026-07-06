@@ -1,0 +1,1985 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="google-site-verification" content="ENITI0G8QNlEov3S3z6z-sdzarZB0iGzogGnapIdFGY" />
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>MindsDB Query Engine — SQL Reference</title>
+<meta name="description" content="Build semantic search pipelines entirely in SQL: connect data sources live, index content into knowledge bases, run hybrid vector + keyword search.">
+<meta name="robots" content="index, follow">
+<meta name="theme-color" content="#070d19">
+<link rel="canonical" href="https://mindsdb.github.io/engine/">
+<meta property="og:title" content="MindsDB Query Engine — SQL Reference">
+<meta property="og:description" content="Build semantic search pipelines entirely in SQL: connect data sources live, index content into knowledge bases, run hybrid vector + keyword search.">
+<meta property="og:url" content="https://mindsdb.github.io/engine/">
+<meta property="og:type" content="website">
+<meta property="og:site_name" content="MindsDB Query Engine">
+<meta property="og:image" content="https://mindsdb.github.io/engine/og-image.png">
+<meta property="og:image:width" content="1200">
+<meta property="og:image:height" content="630">
+<meta property="og:image:alt" content="MindsDB Query Engine — Semantic Search via SQL">
+<meta name="twitter:card" content="summary_large_image">
+<meta name="twitter:title" content="MindsDB Query Engine — SQL Reference">
+<meta name="twitter:description" content="Build semantic search pipelines entirely in SQL: connect data sources live, index content into knowledge bases, run hybrid vector + keyword search.">
+<meta name="twitter:image" content="https://mindsdb.github.io/engine/og-image.png">
+<script type="application/ld+json">
+{
+  "@context": "https://schema.org",
+  "@type": "WebSite",
+  "name": "MindsDB Query Engine — SQL Reference",
+  "url": "https://mindsdb.github.io/engine/",
+  "description": "Build semantic search pipelines entirely in SQL: connect data sources live, index content into knowledge bases, run hybrid vector + keyword search.",
+  "about": {
+    "@type": "SoftwareApplication",
+    "name": "MindsDB Query Engine",
+    "applicationCategory": "DeveloperApplication",
+    "operatingSystem": "Linux, macOS, Windows",
+    "sameAs": "https://github.com/mindsdb/engine"
+  }
+}
+</script>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
+<link href="https://cdnjs.cloudflare.com/ajax/libs/prism/1.29.0/themes/prism-tomorrow.min.css" rel="stylesheet">
+<style>
+:root{
+  --bg:#070d19;--surface:#0c1422;--surface-2:#111827;--surface-3:#162033;
+  --line:#1a2540;--line-2:#243354;
+  --ink:#eef2ff;--ink-2:#b8c5e0;--ink-3:#7a8eab;--ink-4:#495d7a;--ink-5:#2d3f5a;
+  --accent:rgb(34,211,238);--accent-2:rgb(8,178,207);--accent-3:rgb(6,145,170);
+  --accent-bg:rgba(34,211,238,0.06);--accent-glow:rgba(34,211,238,0.25);
+  --danger:#f87171;--danger-bg:rgba(248,113,113,0.08);
+  --ok:#6ee7b7;--ok-bg:rgba(110,231,183,0.08);
+  --warn:#fbbf24;--warn-bg:rgba(251,191,36,0.08);
+  --r:7px;--r-lg:12px;--r-xl:18px;
+  --sh:0 1px 0 rgba(0,0,0,0.4),0 4px 12px rgba(0,0,0,0.4);
+  --sh-lg:0 1px 0 rgba(0,0,0,0.4),0 18px 40px rgba(0,0,0,0.6);
+  --sidebar-w:268px;--header-h:56px;
+  --font:-apple-system,'Inter',sans-serif;
+  --font-mono:'JetBrains Mono',monospace;
+}
+*{box-sizing:border-box;margin:0;padding:0}
+html{scroll-behavior:smooth;scroll-padding-top:calc(var(--header-h) + 24px)}
+body{background:var(--bg);color:var(--ink);font-family:var(--font);font-size:15px;line-height:1.65;-webkit-font-smoothing:antialiased}
+
+/* ── BASE ── */
+*{box-sizing:border-box;margin:0;padding:0}
+html{scroll-behavior:smooth;scroll-padding-top:calc(var(--header-h) + 28px)}
+body{background:var(--bg);color:var(--ink);font-family:var(--font);font-size:15px;line-height:1.7;-webkit-font-smoothing:antialiased;text-rendering:optimizeLegibility}
+
+::-webkit-scrollbar{width:5px;height:5px}
+::-webkit-scrollbar-track{background:transparent}
+::-webkit-scrollbar-thumb{background:var(--line-2);border-radius:99px}
+
+/* ── HEADER ── */
+#hdr{
+  position:fixed;top:0;left:0;right:0;height:var(--header-h);z-index:100;
+  background:rgba(7,13,25,0.75);backdrop-filter:blur(20px) saturate(180%);
+  border-bottom:1px solid rgba(26,37,64,0.8);
+  display:flex;align-items:center;gap:16px;padding:0 24px;
+}
+.logo{display:flex;align-items:center;gap:10px;text-decoration:none;flex-shrink:0}
+.logo-mark{
+  width:30px;height:30px;border-radius:8px;
+  background:linear-gradient(135deg,var(--accent),var(--accent-3));
+  display:flex;align-items:center;justify-content:center;
+  box-shadow:0 0 20px rgba(34,211,238,0.3),0 2px 8px rgba(0,0,0,0.4);
+}
+.logo-mark svg{width:15px;height:15px;fill:#060e1a}
+.logo-text{font-size:15px;font-weight:700;letter-spacing:-0.4px;
+  background:linear-gradient(90deg,var(--ink) 60%,var(--ink-3));
+  -webkit-background-clip:text;-webkit-text-fill-color:transparent;background-clip:text}
+.logo-text span{
+  background:linear-gradient(90deg,var(--accent),var(--accent-2));
+  -webkit-background-clip:text;-webkit-text-fill-color:transparent;background-clip:text}
+.hdr-sep{width:1px;height:20px;background:var(--line);flex-shrink:0}
+.hdr-badge{
+  font-size:10.5px;font-weight:600;color:var(--ink-4);
+  background:var(--surface-2);border:1px solid var(--line);
+  border-radius:6px;padding:3px 8px;letter-spacing:0.6px;text-transform:uppercase;
+}
+#search-wrap{flex:1;max-width:340px;position:relative}
+#search{
+  width:100%;height:34px;background:rgba(17,24,39,0.6);
+  border:1px solid var(--line);border-radius:var(--r);
+  color:var(--ink);font-family:var(--font);font-size:13px;
+  padding:0 12px 0 36px;outline:none;
+  transition:border-color .2s,box-shadow .2s,background .2s;
+}
+#search::placeholder{color:var(--ink-5)}
+#search:focus{border-color:rgba(34,211,238,0.5);box-shadow:0 0 0 3px rgba(34,211,238,0.07);background:var(--surface-2)}
+.search-icon{position:absolute;left:11px;top:50%;transform:translateY(-50%);color:var(--ink-5);pointer-events:none}
+#search-results{
+  display:none;position:absolute;top:calc(100% + 8px);left:0;right:0;
+  background:var(--surface-2);border:1px solid var(--line);border-radius:var(--r-lg);
+  box-shadow:0 4px 6px rgba(0,0,0,0.2),0 20px 40px rgba(0,0,0,0.5);
+  z-index:200;max-height:360px;overflow-y:auto;
+}
+#search-results.show{display:block}
+.sr-item{display:block;padding:11px 16px;cursor:pointer;border-bottom:1px solid var(--line);text-decoration:none;transition:background .12s}
+.sr-item:last-child{border-bottom:none}
+.sr-item:hover{background:var(--surface-3)}
+.sr-item-title{font-size:13px;font-weight:500;color:var(--ink);margin-bottom:2px}
+.sr-item-path{font-size:11px;color:var(--ink-5);font-family:var(--font-mono)}
+.sr-empty{padding:20px;text-align:center;color:var(--ink-5);font-size:13px}
+.hdr-right{margin-left:auto;display:flex;align-items:center;gap:6px}
+.hdr-link{
+  display:flex;align-items:center;gap:6px;font-size:13px;font-weight:500;
+  color:var(--ink-4);text-decoration:none;padding:6px 11px;
+  border-radius:var(--r);border:1px solid transparent;
+  transition:color .15s,background .15s,border-color .15s;
+}
+.hdr-link:hover{color:var(--ink);background:var(--surface-2);border-color:var(--line)}
+.hdr-link svg{width:15px;height:15px}
+
+/* ── SIDEBAR ── */
+#sidebar{
+  position:fixed;top:var(--header-h);left:0;bottom:0;width:var(--sidebar-w);
+  background:rgba(7,13,25,0.6);backdrop-filter:blur(12px);
+  border-right:1px solid rgba(26,37,64,0.8);
+  overflow-y:auto;padding:20px 0 40px;z-index:90;
+}
+.nav-section{margin-bottom:1px}
+.nav-group-btn{
+  width:100%;background:none;border:none;cursor:pointer;
+  display:flex;align-items:center;justify-content:space-between;
+  padding:8px 18px 6px 18px;color:var(--ink-5);font-family:var(--font);
+  font-size:10.5px;font-weight:700;letter-spacing:0.9px;text-transform:uppercase;
+  transition:color .15s;
+}
+.nav-group-btn:hover{color:var(--ink-3)}
+.nav-group-btn .chevron{transition:transform .22s cubic-bezier(.4,0,.2,1);color:var(--ink-5);flex-shrink:0}
+.nav-group-btn.open .chevron{transform:rotate(90deg)}
+.nav-items{display:none;padding-bottom:6px}
+.nav-items.open{display:block}
+.nav-item{
+  display:block;padding:5px 18px 5px 28px;color:var(--ink-4);
+  text-decoration:none;font-size:13px;font-weight:400;
+  border-left:1.5px solid transparent;margin-left:10px;
+  transition:color .15s,border-color .15s;
+  white-space:nowrap;overflow:hidden;text-overflow:ellipsis;
+}
+.nav-item:hover{color:var(--ink-2);border-left-color:var(--line-2)}
+.nav-item.active{
+  color:var(--accent);border-left-color:var(--accent);font-weight:500;
+}
+.nav-divider{height:1px;background:var(--line);margin:10px 18px 4px}
+
+/* ── MAIN ── */
+#main{margin-left:var(--sidebar-w);padding-top:var(--header-h)}
+.page-content{max-width:800px;margin:0 auto;padding:48px 56px 100px}
+
+/* ── SECTIONS ── */
+.doc-section{padding-top:8px;padding-bottom:4px}
+.section-divider{
+  height:1px;margin:56px 0;
+  background:linear-gradient(90deg,transparent,var(--line) 20%,var(--line) 80%,transparent);
+}
+
+/* ── HERO ── */
+.hero{
+  position:relative;padding:56px 0 48px;margin-bottom:56px;
+  border-bottom:1px solid rgba(26,37,64,0.6);overflow:hidden;
+}
+.hero::before{
+  content:'';position:absolute;top:-80px;left:-120px;
+  width:500px;height:500px;border-radius:50%;
+  background:radial-gradient(ellipse,rgba(34,211,238,0.06) 0%,transparent 70%);
+  pointer-events:none;
+}
+.hero-eyebrow{
+  display:inline-flex;align-items:center;gap:7px;
+  font-size:11px;font-weight:600;letter-spacing:1px;text-transform:uppercase;
+  color:var(--accent);margin-bottom:20px;
+  padding:4px 10px;border:1px solid rgba(34,211,238,0.2);border-radius:99px;
+  background:rgba(34,211,238,0.05);
+}
+.hero-eyebrow::before{content:'';width:5px;height:5px;border-radius:50%;background:var(--accent);box-shadow:0 0 6px var(--accent)}
+.hero-title{
+  font-size:40px;font-weight:700;line-height:1.15;letter-spacing:-1px;
+  margin-bottom:20px;
+}
+.hero-title .line1{color:var(--ink)}
+.hero-title .line2{
+  background:linear-gradient(90deg,var(--accent) 0%,rgba(8,178,207,0.9) 50%,rgba(6,145,170,0.7) 100%);
+  -webkit-background-clip:text;-webkit-text-fill-color:transparent;background-clip:text;
+}
+.hero-desc{font-size:16px;line-height:1.75;color:var(--ink-3);max-width:560px;margin-bottom:36px;font-weight:400}
+
+/* ── PIPELINE ── */
+.pipeline{display:flex;flex-direction:column;gap:0;margin-top:4px;width:fit-content}
+.pipe-main{display:flex;align-items:center;gap:0}
+.pipe-step{
+  display:flex;align-items:center;gap:7px;
+  padding:9px 15px;font-size:12.5px;font-weight:500;
+  border-radius:var(--r-lg);border:1px solid var(--line);
+  background:var(--surface-2);color:var(--ink-3);
+  white-space:nowrap;transition:border-color .2s,color .2s;
+  position:relative;z-index:1;
+}
+.pipe-step:hover{border-color:var(--line-2);color:var(--ink-2)}
+.pipe-step .pipe-icon{font-size:13px;line-height:1}
+.pipe-step.accent{
+  border-color:rgba(34,211,238,0.3);color:var(--accent);
+  background:rgba(34,211,238,0.05);
+  box-shadow:0 0 18px rgba(34,211,238,0.07);
+}
+.pipe-arrow{
+  color:var(--ink-5);font-size:13px;padding:0 8px;
+  flex-shrink:0;line-height:1;
+}
+/* optional branch */
+.pipe-optional{
+  display:flex;align-items:flex-start;padding-left:0;margin-top:0;
+  position:relative;
+}
+.pipe-opt-track{
+  display:flex;flex-direction:column;align-items:center;
+  width:0;/* zero width; just draws the vertical line */
+  position:relative;margin-left:88px;/* ~align under mid-arrow between Connect and Index */
+}
+.pipe-opt-track::before{
+  content:'';display:block;width:1px;height:10px;
+  background:linear-gradient(180deg,var(--line-2),rgba(26,37,64,0.3));
+}
+.pipe-opt-track::after{
+  content:'';display:block;width:1px;height:10px;
+  background:linear-gradient(0deg,var(--line-2),rgba(26,37,64,0.3));
+  order:3;
+}
+.pipe-opt-box{
+  display:flex;align-items:center;gap:6px;
+  padding:7px 14px;border-radius:var(--r-lg);
+  border:1px dashed var(--line-2);
+  background:rgba(255,255,255,0.015);
+  position:relative;margin-left:60px;
+}
+.pipe-opt-tag{
+  font-size:9.5px;font-weight:700;letter-spacing:0.7px;text-transform:uppercase;
+  color:var(--ink-5);background:var(--surface-3);
+  border:1px solid var(--line);border-radius:4px;
+  padding:2px 6px;white-space:nowrap;
+}
+.pipe-opt-step{
+  display:flex;align-items:center;gap:6px;font-size:12px;font-weight:500;
+  color:var(--ink-4);white-space:nowrap;
+}
+.pipe-opt-step .pipe-icon{font-size:12px}
+.pipe-opt-sep{color:var(--ink-5);font-size:11px;padding:0 2px}
+.pipe-opt-conn{
+  display:flex;align-items:center;color:var(--ink-5);
+  font-size:11px;padding:0 2px;
+}
+/* vertical connector line from main row down to optional box */
+.pipe-branch{
+  display:flex;flex-direction:column;align-items:center;
+  position:absolute;/* positioned relative to .pipe-optional */
+}
+.pipe-vline{width:1px;background:var(--line-2)}
+
+/* ── TYPOGRAPHY ── */
+h1{
+  font-size:26px;font-weight:700;letter-spacing:-0.5px;line-height:1.3;
+  margin-bottom:14px;
+  background:linear-gradient(135deg,var(--ink) 60%,var(--ink-2));
+  -webkit-background-clip:text;-webkit-text-fill-color:transparent;background-clip:text;
+}
+h2{
+  font-size:18px;font-weight:600;letter-spacing:-0.25px;color:var(--ink);
+  margin:44px 0 14px;padding-top:4px;display:flex;align-items:center;gap:10px;
+}
+h2::before{
+  content:'';display:block;width:3px;height:18px;flex-shrink:0;
+  background:linear-gradient(180deg,var(--accent),var(--accent-3));
+  border-radius:2px;
+}
+h3{font-size:14.5px;font-weight:600;color:var(--ink-2);margin:28px 0 10px}
+h4{font-size:11.5px;font-weight:700;color:var(--ink-4);margin:20px 0 8px;text-transform:uppercase;letter-spacing:0.7px}
+p{color:var(--ink-3);margin-bottom:14px;line-height:1.72}
+a{color:var(--accent);text-decoration:none;transition:color .15s}
+a:hover{color:var(--accent-2)}
+strong{color:var(--ink-2);font-weight:600}
+code{
+  font-family:var(--font-mono);font-size:11.5px;
+  background:rgba(34,211,238,0.06);border:1px solid rgba(34,211,238,0.12);
+  border-radius:5px;padding:1px 6px;color:rgba(34,211,238,0.9);
+}
+ul,ol{padding-left:22px;margin-bottom:14px;color:var(--ink-3)}
+li{margin-bottom:5px;line-height:1.65}
+li code{font-size:12px}
+
+/* ── CODE BLOCKS ── */
+.code-wrap{margin:20px 0;border-radius:var(--r-lg);overflow:hidden;border:1px solid var(--line);box-shadow:0 4px 24px rgba(0,0,0,0.3)}
+.code-header{
+  background:var(--surface-2);border-bottom:1px solid var(--line);
+  padding:10px 16px;display:flex;align-items:center;gap:10px;
+}
+.code-dots{display:flex;gap:6px}
+.code-dots span{width:10px;height:10px;border-radius:50%}
+.code-dots .d1{background:#ff5f57}
+.code-dots .d2{background:#ffbd2e}
+.code-dots .d3{background:#28ca41}
+.code-lang{
+  flex:1;font-family:var(--font-mono);font-size:11px;font-weight:600;
+  color:var(--ink-5);letter-spacing:0.5px;text-transform:uppercase;
+}
+.copy-btn{
+  background:none;border:1px solid var(--line);border-radius:5px;
+  color:var(--ink-5);font-size:11px;font-weight:500;
+  padding:3px 10px;cursor:pointer;font-family:var(--font);
+  transition:all .15s;letter-spacing:0.2px;
+}
+.copy-btn:hover{color:var(--ink-2);border-color:var(--ink-4)}
+.copy-btn.copied{color:var(--ok);border-color:rgba(110,231,183,0.4)}
+pre{
+  background:var(--surface-2) !important;
+  padding:20px 22px;overflow-x:auto;margin:0;
+  border-radius:0;border:none;box-shadow:none;
+}
+pre code{background:none;border:none;padding:0;font-size:12px;color:var(--ink-3)}
+/* standalone pre (not inside code-wrap) */
+.doc-section>pre,.doc-section p+pre{
+  border:1px solid var(--line);border-radius:var(--r-lg);margin:20px 0;
+  box-shadow:0 4px 24px rgba(0,0,0,0.25);padding:20px 22px;
+}
+/* legacy .pre-label support */
+.pre-label{
+  display:flex;align-items:center;gap:10px;
+  background:var(--surface-2);border:1px solid var(--line);border-bottom:none;
+  border-radius:var(--r-lg) var(--r-lg) 0 0;
+  padding:10px 16px;
+}
+.pre-label::before{
+  content:'';display:block;width:10px;height:10px;border-radius:50%;
+  background:#ff5f57;box-shadow:16px 0 0 #ffbd2e,32px 0 0 #28ca41;
+  flex-shrink:0;margin-right:36px;
+}
+.pre-label span{
+  flex:1;font-family:var(--font-mono);font-size:11px;font-weight:600;
+  color:var(--ink-5);letter-spacing:0.5px;text-transform:uppercase;
+}
+.pre-label+pre{
+  border-top:none;border-radius:0 0 var(--r-lg) var(--r-lg);
+  border:1px solid var(--line);border-top:none;margin-top:0;
+}
+
+/* ── TABLES ── */
+.table-wrap{overflow-x:auto;margin:20px 0;border-radius:var(--r-lg);border:1px solid var(--line);box-shadow:0 2px 12px rgba(0,0,0,0.2)}
+table{width:100%;border-collapse:collapse;font-size:13px}
+th{
+  background:var(--surface-2);padding:10px 16px;text-align:left;
+  font-size:10.5px;font-weight:700;color:var(--ink-5);
+  letter-spacing:0.6px;text-transform:uppercase;border-bottom:1px solid var(--line);
+}
+td{padding:11px 16px;border-bottom:1px solid var(--line);color:var(--ink-3);vertical-align:top;line-height:1.6}
+tr:last-child td{border-bottom:none}
+tr:hover td{background:rgba(255,255,255,0.015)}
+td code{font-size:11.5px}
+
+/* ── CALLOUTS ── */
+.callout{
+  display:flex;gap:14px;padding:14px 18px;border-radius:var(--r-lg);
+  margin:20px 0;font-size:13.5px;line-height:1.65;
+  border:1px solid transparent;
+}
+.callout p{margin:0;line-height:1.65;color:var(--ink-3)}
+.callout-icon{flex-shrink:0;font-size:16px;line-height:1.4}
+.callout.info{
+  background:rgba(34,211,238,0.04);
+  border-color:rgba(34,211,238,0.15);
+  border-left:3px solid var(--accent);
+  color:var(--ink-3);
+}
+.callout.warn{
+  background:rgba(251,191,36,0.04);
+  border-color:rgba(251,191,36,0.15);
+  border-left:3px solid var(--warn);
+  color:var(--ink-3);
+}
+.callout.danger{
+  background:rgba(248,113,113,0.04);
+  border-color:rgba(248,113,113,0.15);
+  border-left:3px solid var(--danger);
+  color:var(--ink-3);
+}
+.callout.ok{
+  background:rgba(110,231,183,0.04);
+  border-color:rgba(110,231,183,0.15);
+  border-left:3px solid var(--ok);
+  color:var(--ink-3);
+}
+
+/* ── SYNTAX CARDS ── */
+.syntax-card{
+  background:var(--surface-2);border:1px solid var(--line);
+  border-radius:var(--r-lg);overflow:hidden;margin:20px 0;
+  box-shadow:0 4px 24px rgba(0,0,0,0.25);
+}
+.syntax-card-header{
+  background:var(--surface-3);padding:11px 18px;
+  border-bottom:1px solid var(--line);
+  display:flex;align-items:center;gap:10px;
+}
+.syntax-card-header::before{
+  content:'';display:block;width:10px;height:10px;border-radius:50%;flex-shrink:0;
+  background:#ff5f57;box-shadow:16px 0 0 #ffbd2e,32px 0 0 #28ca41;
+  margin-right:36px;
+}
+.syntax-card-header .cmd{
+  font-family:var(--font-mono);font-size:12px;font-weight:600;color:var(--accent);
+}
+.syntax-card-header .desc{font-size:12px;color:var(--ink-5);margin-left:4px}
+.syntax-card pre{margin:0;border:none;border-radius:0;box-shadow:none;background:var(--surface-2) !important}
+
+/* ── PARAM TABLE ── */
+.param-table{margin:20px 0;border:1px solid var(--line);border-radius:var(--r-lg);overflow:hidden}
+.param-row{
+  display:grid;grid-template-columns:190px 1fr;gap:16px;
+  padding:12px 18px;border-bottom:1px solid var(--line);align-items:start;
+}
+.param-row:last-child{border-bottom:none}
+.param-row:hover{background:rgba(255,255,255,0.015)}
+.param-name{font-family:var(--font-mono);font-size:12px;color:rgba(34,211,238,0.85);font-weight:500;line-height:1.8}
+.param-name.required::after{
+  content:'required';font-family:var(--font);font-size:9.5px;font-weight:700;
+  background:rgba(34,211,238,0.08);color:rgba(34,211,238,0.6);
+  border:1px solid rgba(34,211,238,0.15);border-radius:4px;padding:1px 5px;
+  margin-left:7px;letter-spacing:0.4px;vertical-align:middle;
+}
+.param-name.optional::after{
+  content:'optional';font-family:var(--font);font-size:9.5px;font-weight:600;
+  background:var(--surface-3);color:var(--ink-5);
+  border:1px solid var(--line);border-radius:4px;padding:1px 5px;
+  margin-left:7px;letter-spacing:0.4px;vertical-align:middle;
+}
+.param-desc{font-size:13px;color:var(--ink-4);line-height:1.6}
+
+/* ── STEPS ── */
+.steps{margin:24px 0}
+.step{display:flex;gap:18px;margin-bottom:24px;position:relative}
+.step:not(:last-child)::after{
+  content:'';position:absolute;left:13px;top:30px;bottom:-18px;
+  width:1px;background:var(--line);
+}
+.step-num{
+  flex-shrink:0;width:28px;height:28px;border-radius:50%;
+  background:rgba(34,211,238,0.07);border:1px solid rgba(34,211,238,0.25);
+  display:flex;align-items:center;justify-content:center;
+  font-size:11px;font-weight:700;color:var(--accent);z-index:1;
+}
+.step-body h3{margin-top:4px;margin-bottom:8px;font-size:14px;color:var(--ink-2)}
+.step-body p{margin-bottom:10px;font-size:13.5px}
+
+/* ── ANCHOR HEADINGS ── */
+.anchor-heading{display:flex;align-items:center;gap:8px}
+.anchor-link{opacity:0;color:var(--ink-5);font-size:13px;text-decoration:none;transition:opacity .15s;font-weight:400}
+.anchor-heading:hover .anchor-link{opacity:1}
+
+/* ── PRISM OVERRIDES ── */
+.token.keyword{color:#c792ea}
+.token.function{color:#82aaff}
+.token.string{color:#c3e88d}
+.token.comment{color:var(--ink-5);font-style:italic}
+.token.number{color:#f78c6c}
+.token.operator{color:rgba(34,211,238,0.8)}
+.token.punctuation{color:var(--ink-4)}
+.token.class-name{color:#ffcb6b}
+.token.property{color:#80cbc4}
+
+/* ── MOBILE ── */
+@media(max-width:960px){
+  #sidebar{transform:translateX(-100%);transition:transform .25s cubic-bezier(.4,0,.2,1)}
+  #sidebar.open{transform:translateX(0)}
+  #main{margin-left:0}
+  .page-content{padding:28px 22px 72px}
+  .pipe-main{flex-direction:column;align-items:flex-start}
+  .pipe-arrow{transform:rotate(90deg);padding:4px 0}
+  .pipeline>div:last-child{padding-left:0!important}
+  h1{font-size:22px}
+  .hero-title{font-size:30px}
+}
+</style>
+</head>
+<body>
+
+<!-- HEADER -->
+<header id="hdr">
+  <a class="logo" href="#intro">
+    <div class="logo-mark">
+      <svg viewBox="0 0 16 16"><path d="M2 2h5v5H2zm7 0h5v5H9zm0 7h5v5H9zM2 9h5v5H2z"/></svg>
+    </div>
+    <span class="logo-text">Minds<span>DB</span></span>
+  </a>
+  <div class="hdr-sep"></div>
+  <span class="hdr-badge">SQL Reference</span>
+  <div id="search-wrap">
+    <svg class="search-icon" width="14" height="14" viewBox="0 0 16 16" fill="currentColor"><path d="M11.742 10.344a6.5 6.5 0 1 0-1.397 1.398l3.85 3.85a1 1 0 0 0 1.415-1.414l-3.868-3.834zm-5.242 1.406a5 5 0 1 1 0-10 5 5 0 0 1 0 10z"/></svg>
+    <input id="search" type="search" placeholder="Search docs… (/)">
+    <div id="search-results"></div>
+  </div>
+  <div class="hdr-right">
+    <a class="hdr-link" href="https://github.com/mindsdb/engine" target="_blank">
+      <svg viewBox="0 0 16 16" fill="currentColor"><path d="M8 0C3.58 0 0 3.58 0 8c0 3.54 2.29 6.53 5.47 7.59.4.07.55-.17.55-.38 0-.19-.01-.82-.01-1.49-2.01.37-2.53-.49-2.69-.94-.09-.23-.48-.94-.82-1.13-.28-.15-.68-.52-.01-.53.63-.01 1.08.58 1.23.82.72 1.21 1.87.87 2.33.66.07-.52.28-.87.51-1.07-1.78-.2-3.64-.89-3.64-3.95 0-.87.31-1.59.82-2.15-.08-.2-.36-1.02.08-2.12 0 0 .67-.21 2.2.82.64-.18 1.32-.27 2-.27.68 0 1.36.09 2 .27 1.53-1.04 2.2-.82 2.2-.82.44 1.1.16 1.92.08 2.12.51.56.82 1.27.82 2.15 0 3.07-1.87 3.75-3.65 3.95.29.25.54.73.54 1.48 0 1.07-.01 1.93-.01 2.2 0 .21.15.46.55.38A8.013 8.013 0 0 0 16 8c0-4.42-3.58-8-8-8z"/></svg>
+      GitHub
+    </a>
+  </div>
+</header>
+
+<!-- SIDEBAR -->
+<nav id="sidebar">
+  <div class="nav-section">
+    <button class="nav-group-btn open" onclick="toggleNav(this)">
+      Getting Started <svg class="chevron" width="12" height="12" viewBox="0 0 12 12" fill="currentColor"><path d="M4.5 3L7.5 6l-3 3"/></svg>
+    </button>
+    <div class="nav-items open">
+      <a class="nav-item" href="#intro">Introduction</a>
+      <a class="nav-item" href="#quickstart">Quickstart</a>
+    </div>
+  </div>
+  <div class="nav-section">
+    <button class="nav-group-btn open" onclick="toggleNav(this)">
+      Setup <svg class="chevron" width="12" height="12" viewBox="0 0 12 12" fill="currentColor"><path d="M4.5 3L7.5 6l-3 3"/></svg>
+    </button>
+    <div class="nav-items open">
+      <a class="nav-item" href="#setup-docker">Docker</a>
+      <a class="nav-item" href="#setup-pip">pip install</a>
+      <a class="nav-item" href="#setup-clients">Connect Clients</a>
+    </div>
+  </div>
+  <div class="nav-divider"></div>
+  <div class="nav-section">
+    <button class="nav-group-btn open" onclick="toggleNav(this)">
+      Databases <svg class="chevron" width="12" height="12" viewBox="0 0 12 12" fill="currentColor"><path d="M4.5 3L7.5 6l-3 3"/></svg>
+    </button>
+    <div class="nav-items open">
+      <a class="nav-item" href="#db-create">CREATE DATABASE</a>
+      <a class="nav-item" href="#db-drop">DROP DATABASE</a>
+      <a class="nav-item" href="#db-show">SHOW DATABASES</a>
+      <a class="nav-item" href="#db-use">USE</a>
+      <a class="nav-item" href="#native-queries">Native Queries</a>
+    </div>
+  </div>
+  <div class="nav-section">
+    <button class="nav-group-btn open" onclick="toggleNav(this)">
+      Projects <svg class="chevron" width="12" height="12" viewBox="0 0 12 12" fill="currentColor"><path d="M4.5 3L7.5 6l-3 3"/></svg>
+    </button>
+    <div class="nav-items open">
+      <a class="nav-item" href="#proj-create">CREATE PROJECT</a>
+      <a class="nav-item" href="#proj-drop">DROP PROJECT</a>
+      <a class="nav-item" href="#proj-show">SHOW PROJECTS</a>
+    </div>
+  </div>
+  <div class="nav-section">
+    <button class="nav-group-btn open" onclick="toggleNav(this)">
+      Tables &amp; Views <svg class="chevron" width="12" height="12" viewBox="0 0 12 12" fill="currentColor"><path d="M4.5 3L7.5 6l-3 3"/></svg>
+    </button>
+    <div class="nav-items open">
+      <a class="nav-item" href="#tbl-create">CREATE TABLE</a>
+      <a class="nav-item" href="#tbl-drop">DROP TABLE</a>
+      <a class="nav-item" href="#view-create">CREATE VIEW</a>
+      <a class="nav-item" href="#view-alter">ALTER VIEW</a>
+      <a class="nav-item" href="#view-drop">DROP VIEW</a>
+    </div>
+  </div>
+  <div class="nav-divider"></div>
+  <div class="nav-section">
+    <button class="nav-group-btn open" onclick="toggleNav(this)">
+      SQL Reference <svg class="chevron" width="12" height="12" viewBox="0 0 12 12" fill="currentColor"><path d="M4.5 3L7.5 6l-3 3"/></svg>
+    </button>
+    <div class="nav-items open">
+      <a class="nav-item" href="#sql-select">SELECT</a>
+      <a class="nav-item" href="#sql-insert">INSERT INTO</a>
+      <a class="nav-item" href="#sql-update">UPDATE</a>
+      <a class="nav-item" href="#sql-delete">DELETE</a>
+      <a class="nav-item" href="#sql-join">JOIN</a>
+      <a class="nav-item" href="#sql-case">CASE WHEN</a>
+      <a class="nav-item" href="#sql-cte">CTEs (WITH)</a>
+    </div>
+  </div>
+  <div class="nav-divider"></div>
+  <div class="nav-section">
+    <button class="nav-group-btn open" onclick="toggleNav(this)">
+      Knowledge Bases <svg class="chevron" width="12" height="12" viewBox="0 0 12 12" fill="currentColor"><path d="M4.5 3L7.5 6l-3 3"/></svg>
+    </button>
+    <div class="nav-items open">
+      <a class="nav-item" href="#kb-overview">Overview</a>
+      <a class="nav-item" href="#kb-create">CREATE KNOWLEDGE_BASE</a>
+      <a class="nav-item" href="#kb-params">Parameters</a>
+      <a class="nav-item" href="#kb-alter">ALTER KNOWLEDGE_BASE</a>
+      <a class="nav-item" href="#kb-insert">INSERT INTO KB</a>
+      <a class="nav-item" href="#kb-query">Query / Semantic Search</a>
+      <a class="nav-item" href="#kb-hybrid">Hybrid Search</a>
+      <a class="nav-item" href="#kb-describe">DESCRIBE KB</a>
+      <a class="nav-item" href="#kb-drop">DROP KNOWLEDGE_BASE</a>
+    </div>
+  </div>
+  <div class="nav-divider"></div>
+  <div class="nav-section">
+    <button class="nav-group-btn open" onclick="toggleNav(this)">
+      Agents <svg class="chevron" width="12" height="12" viewBox="0 0 12 12" fill="currentColor"><path d="M4.5 3L7.5 6l-3 3"/></svg>
+    </button>
+    <div class="nav-items open">
+      <a class="nav-item" href="#agent-overview">Overview</a>
+      <a class="nav-item" href="#agent-create">CREATE AGENT</a>
+      <a class="nav-item" href="#agent-select">SELECT FROM AGENT</a>
+      <a class="nav-item" href="#agent-alter">ALTER AGENT</a>
+      <a class="nav-item" href="#agent-drop">DROP / SHOW AGENTS</a>
+    </div>
+  </div>
+  <div class="nav-divider"></div>
+  <div class="nav-section">
+    <button class="nav-group-btn open" onclick="toggleNav(this)">
+      Jobs <svg class="chevron" width="12" height="12" viewBox="0 0 12 12" fill="currentColor"><path d="M4.5 3L7.5 6l-3 3"/></svg>
+    </button>
+    <div class="nav-items open">
+      <a class="nav-item" href="#job-create">CREATE JOB</a>
+      <a class="nav-item" href="#job-last">LAST keyword</a>
+      <a class="nav-item" href="#job-drop">DROP JOB</a>
+      <a class="nav-item" href="#job-show">SHOW / Query JOBS</a>
+    </div>
+  </div>
+  <div class="nav-divider"></div>
+  <div class="nav-section">
+    <button class="nav-group-btn open" onclick="toggleNav(this)">
+      Functions <svg class="chevron" width="12" height="12" viewBox="0 0 12 12" fill="currentColor"><path d="M4.5 3L7.5 6l-3 3"/></svg>
+    </button>
+    <div class="nav-items open">
+      <a class="nav-item" href="#fn-standard">Standard Functions</a>
+      <a class="nav-item" href="#fn-vars">Variables</a>
+      <a class="nav-item" href="#fn-env">FROM_ENV()</a>
+    </div>
+  </div>
+</nav>
+
+<!-- MAIN -->
+<div id="main">
+<div class="page-content">
+
+<!-- ═══════════════════════════════════════════
+     INTRODUCTION
+══════════════════════════════════════════════ -->
+<section id="intro" class="doc-section">
+<div class="hero">
+  <div class="hero-eyebrow">SQL Reference</div>
+  <h1 class="hero-title"><span class="line1">MindsDB Query Engine — </span><span class="line2">Semantic Search via SQL</span></h1>
+  <p class="hero-desc">MindsDB lets you build semantic search pipelines entirely in SQL. Connect your data sources, shape them with views and tables, index unstructured content into knowledge bases, and expose everything through a natural-language agent — all without leaving your SQL client.</p>
+  <div class="pipeline">
+    <!-- main flow -->
+    <div class="pipe-main">
+      <div class="pipe-step"><span class="pipe-icon">🗄️</span> Connect Data</div>
+      <div class="pipe-arrow">──→</div>
+      <div class="pipe-step accent"><span class="pipe-icon">🧠</span> Index in KB</div>
+      <div class="pipe-arrow">──→</div>
+      <div class="pipe-step accent"><span class="pipe-icon">🤖</span> Query via Agent</div>
+    </div>
+    <!-- optional branch: sits below the gap between Connect and Index -->
+    <div style="display:flex;align-items:flex-start;padding-left:148px;">
+      <div style="display:flex;flex-direction:column;align-items:center;">
+        <div style="width:1px;height:10px;background:var(--line-2)"></div>
+        <div class="pipe-opt-box">
+          <span class="pipe-opt-tag">optional</span>
+          <div class="pipe-opt-step"><span class="pipe-icon">🔧</span> Views</div>
+          <span class="pipe-opt-sep">+</span>
+          <div class="pipe-opt-step"><span class="pipe-icon">📁</span> Projects</div>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+</section>
+
+<!-- ═══════════════════════════════════════════
+     QUICKSTART
+══════════════════════════════════════════════ -->
+<section id="quickstart" class="doc-section">
+<h1>Quickstart</h1>
+<p>Five SQL statements to go from zero to a working semantic search agent:</p>
+<div class="pre-label"><span>SQL</span><button class="copy-btn" onclick="copyCode(this)">Copy</button></div>
+<pre><code class="language-sql">-- 1. Connect your data source
+CREATE DATABASE my_pg WITH ENGINE = 'postgres',
+PARAMETERS = {"host":"localhost","port":5432,"user":"user","password":"pass","database":"mydb"};
+
+-- 2. Create a project to organize work
+CREATE PROJECT search_project;
+
+-- 3. Create a knowledge base (semantic index)
+CREATE KNOWLEDGE_BASE search_project.docs_kb
+USING
+  embedding_model = {"provider":"openai","model_name":"text-embedding-3-large","api_key":"sk-..."},
+  content_columns = ['body'],
+  metadata_columns = ['title','category'],
+  id_column = 'doc_id';
+
+-- 4. Index your data
+INSERT INTO search_project.docs_kb
+  SELECT doc_id, title, category, body FROM my_pg.documents;
+
+-- 5. Build the agent
+CREATE AGENT search_project.my_agent
+USING
+  model = {"provider":"openai","model_name":"gpt-4o","api_key":"sk-..."},
+  data = {"knowledge_bases":["search_project.docs_kb"]},
+  prompt_template = 'docs_kb contains product documentation. Answer user questions using it.';
+
+-- Query it
+SELECT answer FROM search_project.my_agent
+WHERE question = 'How do I reset my password?';</code></pre>
+
+<div class="section-divider"></div>
+</section>
+
+<!-- ═══════════════════════════════════════════
+     SETUP
+══════════════════════════════════════════════ -->
+<section id="setup-docker" class="doc-section">
+<h1>Setup</h1>
+<h2 class="anchor-heading" id="setup-docker-h"><a class="anchor-link" href="#setup-docker-h">#</a> Docker</h2>
+<p>The fastest way to run MindsDB locally. Choose the image that fits your integrations:</p>
+<div class="table-wrap"><table>
+<thead><tr><th>Image</th><th>Includes</th></tr></thead>
+<tbody>
+<tr><td><code>mindsdb/mindsdb:latest</code></td><td>mysql, postgresql, snowflake, bigquery, mssql, salesforce</td></tr>
+<tr><td><code>mindsdb/mindsdb:huggingface</code></td><td>All of the above + HuggingFace</td></tr>
+</tbody>
+</table></div>
+<div class="pre-label"><span>BASH</span><button class="copy-btn" onclick="copyCode(this)">Copy</button></div>
+<pre><code class="language-bash">docker run --name mindsdb_container \
+  -e MINDSDB_APIS=http,mysql \
+  -p 47334:47334 -p 47335:47335 \
+  mindsdb/mindsdb</code></pre>
+<p>Access the MindsDB editor at <code>http://127.0.0.1:47334</code>. The MySQL API is available at port <code>47335</code>.</p>
+
+<div class="callout info"><span class="callout-icon">💡</span><p><strong>Persist data:</strong> add <code>-v $(pwd)/mdb_data:/root/mdb_storage</code> to keep models and configs across restarts.</p></div>
+<div class="callout ok"><span class="callout-icon">✓</span><p><strong>With auth:</strong> pass <code>-e MINDSDB_USERNAME=admin -e MINDSDB_PASSWORD=password</code> to enable login.</p></div>
+<div class="callout warn"><span class="callout-icon">⚠</span><p><strong>Local databases:</strong> use <code>http://host.docker.internal</code> instead of <code>localhost</code> when the target DB runs in another container.</p></div>
+
+<h3>Container management</h3>
+<div class="pre-label"><span>BASH</span><button class="copy-btn" onclick="copyCode(this)">Copy</button></div>
+<pre><code class="language-bash">docker stop mindsdb_container    # stop
+docker start mindsdb_container   # restart (preserves state)
+docker logs -f mindsdb_container # follow logs</code></pre>
+
+<h3>Install integration dependencies</h3>
+<p>Once the container is running, install extra integrations directly from the editor (<em>Settings → Manage Integrations</em>), or via shell:</p>
+<div class="pre-label"><span>BASH</span><button class="copy-btn" onclick="copyCode(this)">Copy</button></div>
+<pre><code class="language-bash">docker exec mindsdb_container pip install mindsdb[pgvector]</code></pre>
+</section>
+
+<section id="setup-pip" class="doc-section">
+<h2 class="anchor-heading"><a class="anchor-link" href="#setup-pip">#</a> pip install</h2>
+<div class="pre-label"><span>BASH</span><button class="copy-btn" onclick="copyCode(this)">Copy</button></div>
+<pre><code class="language-bash">pip install mindsdb
+
+# with extras
+pip install mindsdb[pgvector,openai,postgres]</code></pre>
+<div class="pre-label"><span>BASH — start</span><button class="copy-btn" onclick="copyCode(this)">Copy</button></div>
+<pre><code class="language-bash">python -m mindsdb</code></pre>
+<p>Editor: <code>http://127.0.0.1:47334</code> &nbsp;·&nbsp; MySQL API: port <code>47335</code> &nbsp;·&nbsp; PostgreSQL API: port <code>47336</code></p>
+</section>
+
+<section id="setup-clients" class="doc-section">
+<h2 class="anchor-heading"><a class="anchor-link" href="#setup-clients">#</a> Connect Clients</h2>
+<p>MindsDB exposes a MySQL-compatible wire protocol. Any MySQL client can connect:</p>
+<div class="table-wrap"><table>
+<thead><tr><th>Client</th><th>Host</th><th>Port</th><th>User</th><th>Password</th></tr></thead>
+<tbody>
+<tr><td>MySQL CLI / DBeaver / TablePlus</td><td>127.0.0.1</td><td>47335</td><td>mindsdb</td><td>(empty)</td></tr>
+<tr><td>MindsDB Editor</td><td colspan="4">http://127.0.0.1:47334</td></tr>
+<tr><td>SQLAlchemy</td><td colspan="4"><code>mysql+pymysql://mindsdb@127.0.0.1:47335/mindsdb</code></td></tr>
+</tbody>
+</table></div>
+<div class="pre-label"><span>BASH — MySQL CLI</span><button class="copy-btn" onclick="copyCode(this)">Copy</button></div>
+<pre><code class="language-bash">mysql -h 127.0.0.1 --port 47335 -u mindsdb -p</code></pre>
+<div class="pre-label"><span>PYTHON — SQLAlchemy</span><button class="copy-btn" onclick="copyCode(this)">Copy</button></div>
+<pre><code class="language-python">from sqlalchemy import create_engine
+engine = create_engine("mysql+pymysql://mindsdb@127.0.0.1:47335/mindsdb")
+with engine.connect() as conn:
+    result = conn.execute("SELECT answer FROM my_agent WHERE question = 'hello'")</code></pre>
+<div class="section-divider"></div>
+</section>
+
+<!-- ═══════════════════════════════════════════
+     DATABASES
+══════════════════════════════════════════════ -->
+<section id="db-create" class="doc-section">
+<h1>Databases</h1>
+<p>Databases are connections to external data sources — your Postgres, MySQL, S3, Snowflake, MongoDB, etc. MindsDB <strong>never copies your data</strong>; it queries it live each time.</p>
+
+<h2 class="anchor-heading"><a class="anchor-link" href="#db-create">#</a> CREATE DATABASE</h2>
+<div class="syntax-card">
+  <div class="syntax-card-header"><span class="cmd">CREATE DATABASE</span><span class="desc">Connect an external data source</span></div>
+  <pre><code class="language-sql">CREATE DATABASE [IF NOT EXISTS] datasource_name
+[WITH] [ENGINE [=] engine_name] [,]
+[PARAMETERS [=] {
+  "key": "value",
+  ...
+}];</code></pre>
+</div>
+
+<div class="param-table">
+  <div class="param-row"><span class="param-name required">datasource_name</span><span class="param-desc">Unique identifier for this connection within MindsDB.</span></div>
+  <div class="param-row"><span class="param-name required">engine_name</span><span class="param-desc">The handler to use (e.g. <code>'postgres'</code>, <code>'mysql'</code>, <code>'mongodb'</code>, <code>'snowflake'</code>, <code>'s3'</code>).</span></div>
+  <div class="param-row"><span class="param-name optional">PARAMETERS</span><span class="param-desc">JSON object of connection parameters specific to the engine (host, port, user, password, database, etc.).</span></div>
+</div>
+
+<h3>Examples</h3>
+<div class="pre-label"><span>PostgreSQL</span><button class="copy-btn" onclick="copyCode(this)">Copy</button></div>
+<pre><code class="language-sql">CREATE DATABASE my_postgres
+WITH ENGINE = 'postgres',
+PARAMETERS = {
+  "host": "127.0.0.1",
+  "port": 5432,
+  "user": "postgres",
+  "password": "password",
+  "database": "mydb"
+};</code></pre>
+
+<div class="pre-label"><span>MySQL</span><button class="copy-btn" onclick="copyCode(this)">Copy</button></div>
+<pre><code class="language-sql">CREATE DATABASE my_mysql
+WITH ENGINE = 'mysql',
+PARAMETERS = {
+  "host": "127.0.0.1",
+  "port": 3306,
+  "user": "root",
+  "password": "password",
+  "database": "mydb"
+};</code></pre>
+
+<div class="pre-label"><span>MongoDB</span><button class="copy-btn" onclick="copyCode(this)">Copy</button></div>
+<pre><code class="language-sql">CREATE DATABASE my_mongo
+WITH ENGINE = 'mongodb',
+PARAMETERS = {
+  "host": "mongodb+srv://user:pass@cluster.mongodb.net",
+  "database": "mydb"
+};</code></pre>
+
+<div class="callout info"><span class="callout-icon">💡</span><p>Query all available data handlers: <code>SELECT * FROM information_schema.handlers WHERE type = 'data';</code></p></div>
+</section>
+
+<section id="db-drop" class="doc-section">
+<h2 class="anchor-heading"><a class="anchor-link" href="#db-drop">#</a> DROP DATABASE</h2>
+<div class="syntax-card">
+  <div class="syntax-card-header"><span class="cmd">DROP DATABASE</span><span class="desc">Remove a connected data source</span></div>
+  <pre><code class="language-sql">DROP DATABASE [IF EXISTS] database_name;</code></pre>
+</div>
+<div class="callout warn"><span class="callout-icon">⚠</span><p>Dropping a database removes the connection only. No data in the external source is affected.</p></div>
+</section>
+
+<section id="db-show" class="doc-section">
+<h2 class="anchor-heading"><a class="anchor-link" href="#db-show">#</a> SHOW DATABASES</h2>
+<div class="pre-label"><span>SQL</span><button class="copy-btn" onclick="copyCode(this)">Copy</button></div>
+<pre><code class="language-sql">-- List all databases and projects
+SHOW DATABASES;
+SHOW FULL DATABASES;
+
+-- Filter to data sources only
+SHOW FULL DATABASES WHERE type = 'data';
+
+-- Via information_schema
+SELECT * FROM information_schema.databases;
+
+-- List tables in a database
+SHOW TABLES FROM datasource_name;</code></pre>
+</section>
+
+<section id="db-use" class="doc-section">
+<h2 class="anchor-heading"><a class="anchor-link" href="#db-use">#</a> USE</h2>
+<p>Switch context to a database or project. Subsequent queries can omit the database prefix.</p>
+<div class="pre-label"><span>SQL</span><button class="copy-btn" onclick="copyCode(this)">Copy</button></div>
+<pre><code class="language-sql">USE datasource_name;
+
+-- Now you can query directly
+SELECT * FROM table_name LIMIT 10;
+
+-- Switch to a project
+USE my_project;</code></pre>
+</section>
+
+<section id="native-queries" class="doc-section">
+<h2 class="anchor-heading"><a class="anchor-link" href="#native-queries">#</a> Native Queries</h2>
+<p>Pass database-native syntax through MindsDB without translation. Useful for database-specific functions, MongoDB-QL, Snowflake SQL extensions, etc.</p>
+<div class="pre-label"><span>SQL — PostgreSQL native query</span><button class="copy-btn" onclick="copyCode(this)">Copy</button></div>
+<pre><code class="language-sql">SELECT * FROM my_postgres (
+  SELECT
+    model,
+    year,
+    price,
+    ROUND(CAST((mpg / 2.3521458) AS numeric), 1) AS kml,
+    COUNT(*) OVER (PARTITION BY model, year) AS units_to_sell
+  FROM demo_data.used_cars
+);</code></pre>
+
+<div class="pre-label"><span>SQL — MongoDB-QL native query</span><button class="copy-btn" onclick="copyCode(this)">Copy</button></div>
+<pre><code class="language-sql">SELECT * FROM my_mongo (
+  db.products.find({"category": "electronics"}).limit(50)
+);</code></pre>
+
+<div class="pre-label"><span>SQL — create view from native query</span><button class="copy-btn" onclick="copyCode(this)">Copy</button></div>
+<pre><code class="language-sql">CREATE VIEW enriched_cars FROM my_postgres (
+  SELECT *, ROUND(CAST((mpg / 2.3521458) AS numeric), 1) AS kml
+  FROM demo_data.used_cars
+);</code></pre>
+<div class="section-divider"></div>
+</section>
+
+<!-- ═══════════════════════════════════════════
+     PROJECTS
+══════════════════════════════════════════════ -->
+<section id="proj-create" class="doc-section">
+<h1>Projects</h1>
+<p>Projects are namespaces that hold knowledge bases, agents, views, and jobs. They let you organize your AI pipeline by use case (e.g. <code>search_prod</code>, <code>search_staging</code>).</p>
+
+<h2 class="anchor-heading"><a class="anchor-link" href="#proj-create">#</a> CREATE PROJECT</h2>
+<div class="syntax-card">
+  <div class="syntax-card-header"><span class="cmd">CREATE PROJECT</span></div>
+  <pre><code class="language-sql">CREATE PROJECT [IF NOT EXISTS] project_name;</code></pre>
+</div>
+<div class="pre-label"><span>SQL</span><button class="copy-btn" onclick="copyCode(this)">Copy</button></div>
+<pre><code class="language-sql">CREATE PROJECT search_project;
+CREATE PROJECT IF NOT EXISTS analytics;</code></pre>
+</section>
+
+<section id="proj-drop" class="doc-section">
+<h2 class="anchor-heading"><a class="anchor-link" href="#proj-drop">#</a> DROP PROJECT</h2>
+<div class="syntax-card">
+  <div class="syntax-card-header"><span class="cmd">DROP PROJECT</span></div>
+  <pre><code class="language-sql">DROP PROJECT [IF EXISTS] project_name;</code></pre>
+</div>
+</section>
+
+<section id="proj-show" class="doc-section">
+<h2 class="anchor-heading"><a class="anchor-link" href="#proj-show">#</a> SHOW PROJECTS</h2>
+<div class="pre-label"><span>SQL</span><button class="copy-btn" onclick="copyCode(this)">Copy</button></div>
+<pre><code class="language-sql">-- List all projects
+SHOW DATABASES WHERE type = 'project';
+SHOW FULL DATABASES WHERE type = 'project';
+
+-- List objects in a project
+SHOW TABLES FROM project_name;
+SHOW VIEWS FROM project_name;
+SHOW KNOWLEDGE_BASES FROM project_name;</code></pre>
+<div class="section-divider"></div>
+</section>
+
+<!-- ═══════════════════════════════════════════
+     TABLES & VIEWS
+══════════════════════════════════════════════ -->
+<section id="tbl-create" class="doc-section">
+<h1>Tables &amp; Views</h1>
+<p>Use tables and views to shape and materialize data before indexing it into a knowledge base. Views are saved SELECT statements (virtual); tables are materialized results (physical).</p>
+
+<h2 class="anchor-heading"><a class="anchor-link" href="#tbl-create">#</a> CREATE TABLE</h2>
+<p>Create an empty table or materialize a query result into an integration.</p>
+<div class="syntax-card">
+  <div class="syntax-card-header"><span class="cmd">CREATE TABLE</span><span class="desc">Empty table or filled from query</span></div>
+  <pre><code class="language-sql">-- Empty table
+CREATE TABLE integration_name.table_name (
+  column_name data_type,
+  ...
+);
+
+-- Filled from query
+CREATE TABLE integration_name.table_name (SELECT ...);
+
+-- Replace if exists
+CREATE OR REPLACE TABLE integration_name.table_name (SELECT ...);</code></pre>
+</div>
+
+<div class="pre-label"><span>SQL — materialize cleaned data</span><button class="copy-btn" onclick="copyCode(this)">Copy</button></div>
+<pre><code class="language-sql">-- Clean and materialize support tickets for KB ingestion
+CREATE OR REPLACE TABLE my_pg.clean_tickets (
+  SELECT
+    id,
+    category,
+    TRIM(LOWER(subject))  AS subject,
+    body,
+    created_at
+  FROM my_pg.raw_support_tickets
+  WHERE body IS NOT NULL
+    AND LENGTH(body) > 20
+);</code></pre>
+</section>
+
+<section id="tbl-drop" class="doc-section">
+<h2 class="anchor-heading"><a class="anchor-link" href="#tbl-drop">#</a> DROP TABLE</h2>
+<div class="syntax-card">
+  <div class="syntax-card-header"><span class="cmd">DROP TABLE</span></div>
+  <pre><code class="language-sql">DROP TABLE table_name;
+DROP TABLE files.uploaded_file;</code></pre>
+</div>
+</section>
+
+<section id="view-create" class="doc-section">
+<h2 class="anchor-heading"><a class="anchor-link" href="#view-create">#</a> CREATE VIEW</h2>
+<p>A view is a saved SELECT that executes on every access. Perfect for data preparation before sending to a knowledge base.</p>
+<div class="syntax-card">
+  <div class="syntax-card-header"><span class="cmd">CREATE VIEW</span></div>
+  <pre><code class="language-sql">CREATE VIEW [IF NOT EXISTS] [project_name.]view_name AS (
+  SELECT columns
+  FROM integration_name.table_name
+  WHERE ...
+);</code></pre>
+</div>
+
+<div class="pre-label"><span>SQL — create filtered view for KB ingestion</span><button class="copy-btn" onclick="copyCode(this)">Copy</button></div>
+<pre><code class="language-sql">-- View joining tickets with product metadata for richer indexing
+CREATE VIEW search_project.enriched_tickets AS (
+  SELECT
+    t.id,
+    t.body,
+    t.created_at,
+    p.name    AS product_name,
+    p.category AS product_category
+  FROM my_pg.support_tickets t
+  JOIN my_pg.products p ON t.product_id = p.id
+  WHERE t.status = 'closed'
+);</code></pre>
+
+<div class="pre-label"><span>SQL — list views</span><button class="copy-btn" onclick="copyCode(this)">Copy</button></div>
+<pre><code class="language-sql">SHOW VIEWS;
+SHOW FULL VIEWS;</code></pre>
+</section>
+
+<section id="view-alter" class="doc-section">
+<h2 class="anchor-heading"><a class="anchor-link" href="#view-alter">#</a> ALTER VIEW</h2>
+<div class="syntax-card">
+  <div class="syntax-card-header"><span class="cmd">ALTER VIEW</span></div>
+  <pre><code class="language-sql">-- Standard syntax
+ALTER VIEW view_name [AS] (
+  SELECT * FROM integration_name.table_name
+);
+
+-- With explicit source
+ALTER VIEW view_name
+FROM integration_name (
+  SELECT * FROM table_name
+);</code></pre>
+</div>
+</section>
+
+<section id="view-drop" class="doc-section">
+<h2 class="anchor-heading"><a class="anchor-link" href="#view-drop">#</a> DROP VIEW</h2>
+<div class="syntax-card">
+  <div class="syntax-card-header"><span class="cmd">DROP VIEW</span></div>
+  <pre><code class="language-sql">DROP VIEW [IF EXISTS] view_name;</code></pre>
+</div>
+<div class="section-divider"></div>
+</section>
+
+<!-- ═══════════════════════════════════════════
+     SQL REFERENCE
+══════════════════════════════════════════════ -->
+<section id="sql-select" class="doc-section">
+<h1>SQL Reference</h1>
+
+<h2 class="anchor-heading"><a class="anchor-link" href="#sql-select">#</a> SELECT</h2>
+<p>MindsDB supports standard <code>SELECT</code> with all standard clauses. Queries that reference one integration are pushed down to that engine. Cross-integration queries are executed in MindsDB's DuckDB-backed engine.</p>
+
+<div class="pre-label"><span>SQL — basic select</span><button class="copy-btn" onclick="copyCode(this)">Copy</button></div>
+<pre><code class="language-sql">SELECT location, MAX(sqft)
+FROM my_pg.home_rentals
+GROUP BY location
+LIMIT 5;</code></pre>
+
+<div class="pre-label"><span>SQL — subquery on integration data</span><button class="copy-btn" onclick="copyCode(this)">Copy</button></div>
+<pre><code class="language-sql">-- Wrap in subquery when integration doesn't support GROUP BY
+SELECT type, MAX(bedrooms), LAST(price)
+FROM my_mongo (
+  db.house_sales.find().limit(300)
+) GROUP BY 1;</code></pre>
+
+<div class="pre-label"><span>SQL — UNION ALL</span><button class="copy-btn" onclick="copyCode(this)">Copy</button></div>
+<pre><code class="language-sql">SELECT id, content, 'tickets' AS source FROM my_pg.support_tickets
+UNION ALL
+SELECT id, body  AS content, 'forums'  AS source FROM my_pg.forum_posts;</code></pre>
+</section>
+
+<section id="sql-insert" class="doc-section">
+<h2 class="anchor-heading"><a class="anchor-link" href="#sql-insert">#</a> INSERT INTO</h2>
+<p>Insert rows into an integration table from a subquery. The destination table must already exist.</p>
+<div class="syntax-card">
+  <div class="syntax-card-header"><span class="cmd">INSERT INTO</span></div>
+  <pre><code class="language-sql">INSERT INTO integration_name.table_name
+  (SELECT ...);</code></pre>
+</div>
+
+<div class="pre-label"><span>SQL</span><button class="copy-btn" onclick="copyCode(this)">Copy</button></div>
+<pre><code class="language-sql">-- Archive processed tickets into a separate table
+INSERT INTO my_pg.archived_tickets (
+  SELECT * FROM my_pg.support_tickets
+  WHERE resolved_at &lt; '2024-01-01'
+);</code></pre>
+</section>
+
+<section id="sql-update" class="doc-section">
+<h2 class="anchor-heading"><a class="anchor-link" href="#sql-update">#</a> UPDATE</h2>
+<div class="pre-label"><span>SQL — standard update</span><button class="copy-btn" onclick="copyCode(this)">Copy</button></div>
+<pre><code class="language-sql">UPDATE my_pg.support_tickets
+SET status = 'archived'
+WHERE resolved_at &lt; '2024-01-01';</code></pre>
+
+<div class="pre-label"><span>SQL — update from select</span><button class="copy-btn" onclick="copyCode(this)">Copy</button></div>
+<pre><code class="language-sql">UPDATE my_pg.products
+ON product_id
+FROM (
+  SELECT product_id, new_description AS description
+  FROM my_pg.product_updates
+);</code></pre>
+</section>
+
+<section id="sql-delete" class="doc-section">
+<h2 class="anchor-heading"><a class="anchor-link" href="#sql-delete">#</a> DELETE</h2>
+<div class="pre-label"><span>SQL</span><button class="copy-btn" onclick="copyCode(this)">Copy</button></div>
+<pre><code class="language-sql">-- Simple delete
+DELETE FROM my_pg.table_name
+WHERE column_name = 'value';
+
+-- Delete with subquery
+DELETE FROM my_pg.support_tickets
+WHERE id IN (
+  SELECT id FROM my_pg.resolved_tickets
+  WHERE resolved_at &lt; '2023-01-01'
+);</code></pre>
+</section>
+
+<section id="sql-join" class="doc-section">
+<h2 class="anchor-heading"><a class="anchor-link" href="#sql-join">#</a> JOIN</h2>
+<p>Standard SQL JOINs work across tables within the same integration or after bridging with a view/subquery. Use JOINs to denormalize and enrich data before indexing.</p>
+<div class="pre-label"><span>SQL — cross-table join for data prep</span><button class="copy-btn" onclick="copyCode(this)">Copy</button></div>
+<pre><code class="language-sql">-- Enrich tickets with user and product info before KB insert
+SELECT
+  t.id,
+  t.body,
+  u.name       AS user_name,
+  u.plan        AS user_plan,
+  p.name        AS product_name,
+  p.category    AS product_category
+FROM my_pg.support_tickets t
+JOIN my_pg.users    u ON t.user_id    = u.id
+JOIN my_pg.products p ON t.product_id = p.id
+WHERE t.body IS NOT NULL;</code></pre>
+
+<div class="pre-label"><span>SQL — multi-source join via subqueries</span><button class="copy-btn" onclick="copyCode(this)">Copy</button></div>
+<pre><code class="language-sql">SELECT pg_data.id, mongo_data.tags
+FROM (SELECT id, title FROM my_pg.articles) AS pg_data
+JOIN (SELECT article_id, tags FROM my_mongo.article_tags) AS mongo_data
+  ON pg_data.id = mongo_data.article_id;</code></pre>
+</section>
+
+<section id="sql-case" class="doc-section">
+<h2 class="anchor-heading"><a class="anchor-link" href="#sql-case">#</a> CASE WHEN</h2>
+<p>Standard conditional logic in SELECT, WHERE, and other clauses.</p>
+<div class="pre-label"><span>SQL</span><button class="copy-btn" onclick="copyCode(this)">Copy</button></div>
+<pre><code class="language-sql">SELECT
+  id,
+  body,
+  CASE
+    WHEN priority = 1              THEN 'critical'
+    WHEN priority BETWEEN 2 AND 3 THEN 'high'
+    WHEN priority = 4              THEN 'medium'
+    ELSE                               'low'
+  END AS priority_label
+FROM my_pg.support_tickets;</code></pre>
+</section>
+
+<section id="sql-cte" class="doc-section">
+<h2 class="anchor-heading"><a class="anchor-link" href="#sql-cte">#</a> CTEs (WITH)</h2>
+<p>Common Table Expressions create named temporary result sets for modular, readable queries.</p>
+<div class="pre-label"><span>SQL</span><button class="copy-btn" onclick="copyCode(this)">Copy</button></div>
+<pre><code class="language-sql">WITH
+-- Step 1: Get recent tickets
+recent AS (
+  SELECT id, user_id, product_id, body
+  FROM my_pg.support_tickets
+  WHERE created_at > '2024-01-01'
+),
+-- Step 2: Join product info
+enriched AS (
+  SELECT
+    r.id,
+    r.body,
+    p.name     AS product_name,
+    p.category AS category
+  FROM recent r
+  JOIN my_pg.products p ON r.product_id = p.id
+)
+-- Final: Insert into KB
+INSERT INTO search_project.tickets_kb
+  SELECT * FROM enriched;</code></pre>
+<div class="section-divider"></div>
+</section>
+
+<!-- ═══════════════════════════════════════════
+     KNOWLEDGE BASES
+══════════════════════════════════════════════ -->
+<section id="kb-overview" class="doc-section">
+<h1>Knowledge Bases</h1>
+<p>A knowledge base is the semantic index at the heart of MindsDB's search capabilities. It combines an <strong>embedding model</strong>, an optional <strong>reranking model</strong>, and a <strong>vector store</strong> to enable context-aware retrieval over any data you load into it.</p>
+
+<div class="callout ok"><span class="callout-icon">🧠</span><p>Knowledge bases match content by <em>meaning</em>, not keywords. "reset credentials" and "forgot password" return the same document even though no words overlap.</p></div>
+
+<h3>How it works</h3>
+<div class="steps">
+  <div class="step"><div class="step-num">1</div><div class="step-body"><h3>Create</h3><p>Register the KB with an embedding model, optional reranking model, storage backend, and column mapping.</p></div></div>
+  <div class="step"><div class="step-num">2</div><div class="step-body"><h3>Insert</h3><p>Feed rows from any table or view. Each row is chunked, embedded, and written to the vector store.</p></div></div>
+  <div class="step"><div class="step-num">3</div><div class="step-body"><h3>Query</h3><p>Use <code>WHERE content = '...'</code> for semantic search, metadata columns for filtering, and <code>relevance</code> to threshold results.</p></div></div>
+  <div class="step"><div class="step-num">4</div><div class="step-body"><h3>Connect to Agent</h3><p>Reference the KB in a <code>CREATE AGENT</code> statement — the agent reasons over it automatically.</p></div></div>
+</div>
+</section>
+
+<section id="kb-create" class="doc-section">
+<h2 class="anchor-heading"><a class="anchor-link" href="#kb-create">#</a> CREATE KNOWLEDGE_BASE</h2>
+<div class="syntax-card">
+  <div class="syntax-card-header"><span class="cmd">CREATE KNOWLEDGE_BASE</span></div>
+  <pre><code class="language-sql">CREATE KNOWLEDGE_BASE [project_name.]kb_name
+USING
+  embedding_model  = { "provider": "...", "model_name": "...", "api_key": "..." },
+  reranking_model  = { "provider": "...", "model_name": "...", "api_key": "..." },
+  storage          = vector_db_conn.storage_table,
+  metadata_columns = ['col1', 'col2', ...],
+  content_columns  = ['col_a', 'col_b', ...],
+  id_column        = 'id_col';</code></pre>
+</div>
+
+<div class="pre-label"><span>SQL — full example</span><button class="copy-btn" onclick="copyCode(this)">Copy</button></div>
+<pre><code class="language-sql">-- First connect PGVector as the vector store
+CREATE DATABASE my_pgvector
+WITH ENGINE = 'pgvector',
+PARAMETERS = {
+  "host": "127.0.0.1",
+  "port": 5432,
+  "database": "postgres",
+  "user": "user",
+  "password": "password",
+  "distance": "cosine"
+};
+
+-- Create the knowledge base
+CREATE KNOWLEDGE_BASE search_project.support_kb
+USING
+  embedding_model = {
+    "provider":   "openai",
+    "model_name": "text-embedding-3-large",
+    "api_key":    "sk-..."
+  },
+  reranking_model = {
+    "provider":   "openai",
+    "model_name": "gpt-4o",
+    "api_key":    "sk-...",
+    "method":     "multi-class"
+  },
+  storage          = my_pgvector.support_kb_store,
+  metadata_columns = ['product_name', 'priority', 'created_at'],
+  content_columns  = ['subject', 'body'],
+  id_column        = 'ticket_id';</code></pre>
+</section>
+
+<section id="kb-params" class="doc-section">
+<h2 class="anchor-heading"><a class="anchor-link" href="#kb-params">#</a> Parameters</h2>
+
+<h3>embedding_model</h3>
+<p>Required. Converts text into vector representations for similarity search.</p>
+<div class="table-wrap"><table>
+<thead><tr><th>Provider</th><th>Required params</th><th>Optional params</th></tr></thead>
+<tbody>
+<tr><td><code>openai</code></td><td><code>model_name</code>, <code>api_key</code></td><td><code>base_url</code>, <code>api_version</code></td></tr>
+<tr><td><code>openai_azure</code></td><td><code>model_name</code>, <code>api_key</code>, <code>base_url</code>, <code>api_version</code></td><td>—</td></tr>
+<tr><td><code>google</code></td><td><code>model_name</code>, <code>api_key</code></td><td>—</td></tr>
+<tr><td><code>bedrock</code></td><td><code>model_name</code>, <code>aws_access_key_id</code>, <code>aws_region_name</code>, <code>aws_secret_access_key</code></td><td><code>aws_session_token</code></td></tr>
+<tr><td><code>snowflake</code></td><td><code>model_name</code>, <code>api_key</code>, <code>account_id</code></td><td>—</td></tr>
+<tr><td><code>ollama</code></td><td><code>model_name</code>, <code>base_url</code></td><td>—</td></tr>
+</tbody>
+</table></div>
+<div class="callout info"><span class="callout-icon">💡</span><p>Define <code>default_embedding_model</code> in <code>config.json</code> to avoid specifying it on every <code>CREATE KNOWLEDGE_BASE</code>.</p></div>
+
+<h3>reranking_model</h3>
+<p>Optional. Scores result chunks for relevance using an LLM. Supports same providers as <code>embedding_model</code>. Set to <code>false</code> to disable.</p>
+<div class="pre-label"><span>SQL — disable reranking</span><button class="copy-btn" onclick="copyCode(this)">Copy</button></div>
+<pre><code class="language-sql">CREATE KNOWLEDGE_BASE my_kb
+USING
+  embedding_model  = { ... },
+  reranking_model  = false,
+  ...;</code></pre>
+
+<div class="table-wrap"><table>
+<thead><tr><th>method</th><th>Description</th></tr></thead>
+<tbody>
+<tr><td><code>multi-class</code> (default)</td><td>Classifies each chunk into 4 relevance levels (0.25 / 0.5 / 0.75 / 1.0). Relevance = weighted sum of class probabilities.</td></tr>
+<tr><td><code>binary</code></td><td>Relevant / not relevant. Uses log probability of the positive class.</td></tr>
+</tbody>
+</table></div>
+
+<h3>storage</h3>
+<p>The vector database to store embeddings in. Connect it first with <code>CREATE DATABASE</code>.</p>
+<div class="callout ok"><span class="callout-icon">✓</span><p>Recommended: <strong>PGVector ≥ 0.8.0</strong> for best performance and hybrid search support.</p></div>
+<div class="callout info"><span class="callout-icon">💡</span><p>MindsDB Docker Desktop Extension includes a built-in PGVector — <code>storage</code> is optional when using it.</p></div>
+
+<h3>metadata_columns</h3>
+<p>Array of column names used as metadata. Metadata enables fast pre-filtering before or alongside semantic search.</p>
+<div class="callout warn"><span class="callout-icon">⚠</span><p>A column cannot be in both <code>metadata_columns</code> and <code>content_columns</code>.</p></div>
+
+<h3>content_columns</h3>
+<p>Array of column names whose text gets chunked and embedded. Multiple columns are concatenated. Defaults to a column named <code>content</code> if not specified.</p>
+
+<h3>id_column</h3>
+<p>Column that uniquely identifies each source row. Optional — defaults to the MD5 hash of content columns. Used for upsert logic when re-inserting data.</p>
+<div class="pre-label"><span>SQL — auto-generate ID when none exists</span><button class="copy-btn" onclick="copyCode(this)">Copy</button></div>
+<pre><code class="language-sql">INSERT INTO my_kb (
+  SELECT ROW_NUMBER() OVER (ORDER BY created_at) AS id, *
+  FROM my_pg.raw_documents
+);</code></pre>
+</section>
+
+<section id="kb-alter" class="doc-section">
+<h2 class="anchor-heading"><a class="anchor-link" href="#kb-alter">#</a> ALTER KNOWLEDGE_BASE</h2>
+<p>Modify an existing KB configuration. The storage backend and embedding model type cannot be changed (would break existing embeddings), but you can rotate API keys, swap reranking models, and update column mappings.</p>
+<div class="syntax-card">
+  <div class="syntax-card-header"><span class="cmd">ALTER KNOWLEDGE_BASE</span></div>
+  <pre><code class="language-sql">ALTER KNOWLEDGE_BASE kb_name
+USING
+  param_name = value,
+  ...;</code></pre>
+</div>
+
+<div class="pre-label"><span>SQL — rotate API key</span><button class="copy-btn" onclick="copyCode(this)">Copy</button></div>
+<pre><code class="language-sql">ALTER KNOWLEDGE_BASE support_kb
+USING
+  embedding_model = { "api_key": "sk-new-key" };</code></pre>
+
+<div class="pre-label"><span>SQL — swap reranking model</span><button class="copy-btn" onclick="copyCode(this)">Copy</button></div>
+<pre><code class="language-sql">ALTER KNOWLEDGE_BASE support_kb
+USING
+  reranking_model = {
+    "provider": "google",
+    "model_name": "gemini-2.0-flash",
+    "api_key": "AIza..."
+  };</code></pre>
+
+<div class="pre-label"><span>SQL — update metadata columns</span><button class="copy-btn" onclick="copyCode(this)">Copy</button></div>
+<pre><code class="language-sql">-- Add new fields while keeping existing ones filterable
+ALTER KNOWLEDGE_BASE support_kb
+USING
+  metadata_columns = ['product_name', 'priority', 'created_at', 'region'];</code></pre>
+
+<div class="callout warn"><span class="callout-icon">⚠</span><p>Changing <code>metadata_columns</code> doesn't remove old stored metadata. Only the columns listed in the most recent <code>ALTER</code> can be used in <code>WHERE</code> filters going forward.</p></div>
+</section>
+
+<section id="kb-insert" class="doc-section">
+<h2 class="anchor-heading"><a class="anchor-link" href="#kb-insert">#</a> INSERT INTO Knowledge Base</h2>
+<p>Feed data into the KB. Rows are chunked, embedded, and stored in the vector database.</p>
+<div class="pre-label"><span>SQL — insert from table</span><button class="copy-btn" onclick="copyCode(this)">Copy</button></div>
+<pre><code class="language-sql">INSERT INTO search_project.support_kb
+  SELECT ticket_id, subject, body, product_name, priority, created_at
+  FROM my_pg.support_tickets;</code></pre>
+
+<div class="pre-label"><span>SQL — insert from view (enriched data)</span><button class="copy-btn" onclick="copyCode(this)">Copy</button></div>
+<pre><code class="language-sql">INSERT INTO search_project.support_kb
+  SELECT * FROM search_project.enriched_tickets;</code></pre>
+
+<div class="pre-label"><span>SQL — incremental insert (new rows only)</span><button class="copy-btn" onclick="copyCode(this)">Copy</button></div>
+<pre><code class="language-sql">INSERT INTO search_project.support_kb
+  SELECT ticket_id, subject, body, product_name, priority, created_at
+  FROM my_pg.support_tickets
+  WHERE created_at > (
+    SELECT MAX(created_at) FROM search_project.support_kb
+  );</code></pre>
+
+<h3>Performance options</h3>
+<div class="pre-label"><span>SQL — skip duplicate check for bulk loads</span><button class="copy-btn" onclick="copyCode(this)">Copy</button></div>
+<pre><code class="language-sql">-- Faster inserts when you know there are no duplicates
+INSERT INTO my_kb
+  SELECT * FROM my_pg.documents
+USING kb_no_upsert = true;</code></pre>
+
+<div class="callout info"><span class="callout-icon">💡</span><p>Track insert progress: <code>SELECT * FROM information_schema.queries;</code></p></div>
+</section>
+
+<section id="kb-query" class="doc-section">
+<h2 class="anchor-heading"><a class="anchor-link" href="#kb-query">#</a> Query Knowledge Base / Semantic Search</h2>
+<p>Query a knowledge base using the <code>content</code> pseudo-column for semantic search, metadata columns for structured filtering, and <code>relevance</code> for scoring.</p>
+
+<h3>Output columns</h3>
+<div class="table-wrap"><table>
+<thead><tr><th>Column</th><th>Description</th></tr></thead>
+<tbody>
+<tr><td><code>id</code></td><td>Source row identifier (from <code>id_column</code>)</td></tr>
+<tr><td><code>chunk_id</code></td><td>Chunk identifier: <code>&lt;id&gt;:&lt;n&gt;of&lt;total&gt;:&lt;start&gt;to&lt;end&gt;</code></td></tr>
+<tr><td><code>chunk_content</code></td><td>The actual text of this chunk</td></tr>
+<tr><td><code>metadata</code></td><td>JSON blob with all stored metadata fields</td></tr>
+<tr><td><em>metadata cols</em></td><td>Individual metadata columns (e.g. <code>product_name</code>, <code>priority</code>)</td></tr>
+<tr><td><code>distance</code></td><td>Raw vector distance (lower = more similar)</td></tr>
+<tr><td><code>relevance</code></td><td>Score 0–1 from reranking model (or <code>1/(1+distance)</code> if no reranker)</td></tr>
+</tbody>
+</table></div>
+
+<h3>Semantic search</h3>
+<div class="pre-label"><span>SQL — basic semantic search</span><button class="copy-btn" onclick="copyCode(this)">Copy</button></div>
+<pre><code class="language-sql">SELECT *
+FROM search_project.support_kb
+WHERE content = 'how do I reset my password'
+LIMIT 5;</code></pre>
+
+<div class="pre-label"><span>SQL — with relevance threshold</span><button class="copy-btn" onclick="copyCode(this)">Copy</button></div>
+<pre><code class="language-sql">SELECT id, chunk_content, product_name, relevance
+FROM search_project.support_kb
+WHERE content = 'billing issue'
+  AND relevance >= 0.6
+LIMIT 10;</code></pre>
+
+<h3>Metadata filtering</h3>
+<div class="pre-label"><span>SQL — combine semantic + metadata filter</span><button class="copy-btn" onclick="copyCode(this)">Copy</button></div>
+<pre><code class="language-sql">-- Only search within a specific product and priority
+SELECT id, chunk_content, relevance
+FROM search_project.support_kb
+WHERE content = 'cannot connect'
+  AND product_name = 'DataSync Pro'
+  AND priority &lt;= 2
+  AND relevance >= 0.5;</code></pre>
+
+<div class="pre-label"><span>SQL — metadata-only filter (no vector search)</span><button class="copy-btn" onclick="copyCode(this)">Copy</button></div>
+<pre><code class="language-sql">SELECT *
+FROM search_project.support_kb
+WHERE product_name = 'DataSync Pro'
+  AND created_at BETWEEN '2024-01-01' AND '2024-12-31';</code></pre>
+
+<h3>Supported filtering operators</h3>
+<div class="table-wrap"><table>
+<thead><tr><th>Type</th><th>Operators</th></tr></thead>
+<tbody>
+<tr><td>Semantic (content col)</td><td><code>= 'query'</code>, <code>LIKE 'query'</code>, <code>NOT LIKE</code>, <code>IN ('q1','q2')</code>, <code>NOT IN</code>, <code>OR</code>, <code>AND</code> (intersection)</td></tr>
+<tr><td>Metadata</td><td><code>=</code>, <code>!=</code>, <code>&lt;&gt;</code>, <code>&gt;</code>, <code>&lt;</code>, <code>&gt;=</code>, <code>&lt;=</code>, <code>BETWEEN</code>, <code>LIKE</code>, <code>IN</code>, <code>NOT IN</code>, <code>AND</code>, <code>OR</code>, <code>NOT</code></td></tr>
+<tr><td>Exclusion</td><td><code>id != x</code>, <code>id NOT IN (SELECT id FROM kb WHERE content = '...')</code></td></tr>
+</tbody>
+</table></div>
+
+<div class="callout info"><span class="callout-icon">💡</span><p>Default <code>LIMIT</code> is 10. Default <code>relevance</code> threshold is ≥ 0 (no filtering). Specify both to control result count and quality independently.</p></div>
+</section>
+
+<section id="kb-hybrid" class="doc-section">
+<h2 class="anchor-heading"><a class="anchor-link" href="#kb-hybrid">#</a> Hybrid Search</h2>
+<p>Hybrid search combines semantic similarity (vector embeddings) with exact keyword matching (BM25 full-text index). Use it when your queries include specific identifiers, acronyms, product codes, or technical terms that embeddings might miss.</p>
+
+<div class="callout warn"><span class="callout-icon">⚠</span><p>Hybrid search requires <strong>PGVector</strong> as the knowledge base storage backend.</p></div>
+
+<div class="pre-label"><span>SQL — enable hybrid search (default alpha)</span><button class="copy-btn" onclick="copyCode(this)">Copy</button></div>
+<pre><code class="language-sql">SELECT *
+FROM search_project.support_kb
+WHERE content = 'ACME-213 error'
+  AND hybrid_search = true;  -- alpha defaults to 0.5</code></pre>
+
+<div class="pre-label"><span>SQL — tune the semantic/keyword balance</span><button class="copy-btn" onclick="copyCode(this)">Copy</button></div>
+<pre><code class="language-sql">-- hybrid_search_alpha: 0 = pure keyword, 1 = pure semantic
+SELECT *
+FROM search_project.support_kb
+WHERE content = 'ticket ERR-4421'
+  AND hybrid_search_alpha = 0.3;  -- lean toward exact keyword match</code></pre>
+
+<div class="pre-label"><span>SQL — disable reranker for hybrid search</span><button class="copy-btn" onclick="copyCode(this)">Copy</button></div>
+<pre><code class="language-sql">-- Uses alpha-weighted average of BM25 + embedding scores instead
+SELECT *
+FROM search_project.support_kb
+WHERE content = 'ERR-4421'
+  AND hybrid_search_alpha = 0.2
+  AND reranking = false;</code></pre>
+
+<h3>How it works</h3>
+<p>When you trigger hybrid search, both paths run <em>in parallel</em>:</p>
+<div class="table-wrap"><table>
+<thead><tr><th>Path</th><th>Method</th><th>Best for</th></tr></thead>
+<tbody>
+<tr><td>Semantic</td><td>Embedding vector similarity</td><td>Conceptual queries, natural language, paraphrases</td></tr>
+<tr><td>Keyword</td><td>BM25 full-text index</td><td>Exact terms, product codes, acronyms, ticket IDs</td></tr>
+</tbody>
+</table></div>
+<p>Results from both paths are merged and reranked (via the KB's reranking model if available, or via alpha-weighted averaging if not).</p>
+
+<div class="callout ok"><span class="callout-icon">✓</span><p><strong>When to use hybrid search:</strong> any time users search for specific identifiers, technical terms, model numbers, or internal terminology alongside natural language queries.</p></div>
+</section>
+
+<section id="kb-describe" class="doc-section">
+<h2 class="anchor-heading"><a class="anchor-link" href="#kb-describe">#</a> DESCRIBE KNOWLEDGE_BASE</h2>
+<div class="pre-label"><span>SQL</span><button class="copy-btn" onclick="copyCode(this)">Copy</button></div>
+<pre><code class="language-sql">DESCRIBE KNOWLEDGE_BASE support_kb;
+
+-- List all knowledge bases
+SHOW KNOWLEDGE_BASES;
+SHOW KNOWLEDGE_BASES WHERE project = 'search_project';</code></pre>
+
+<p>The <code>DESCRIBE</code> output includes: <code>NAME</code>, <code>PROJECT</code>, <code>STORAGE</code>, <code>PARAMS</code> (embedding/reranking config), <code>INSERT_STARTED_AT</code>, <code>INSERT_FINISHED_AT</code>, <code>PROCESSED_ROWS</code>, <code>ERROR</code>.</p>
+</section>
+
+<section id="kb-drop" class="doc-section">
+<h2 class="anchor-heading"><a class="anchor-link" href="#kb-drop">#</a> DROP KNOWLEDGE_BASE</h2>
+<div class="syntax-card">
+  <div class="syntax-card-header"><span class="cmd">DROP KNOWLEDGE_BASE</span><span class="desc">Removes the KB and all stored embeddings</span></div>
+  <pre><code class="language-sql">DROP KNOWLEDGE_BASE [IF EXISTS] kb_name;
+DROP KNOWLEDGE_BASE [IF EXISTS] project_name.kb_name;</code></pre>
+</div>
+<div class="callout danger"><span class="callout-icon">⚠</span><p>This permanently removes all embeddings and metadata from the vector store. Cannot be undone.</p></div>
+
+<div class="section-divider"></div>
+</section>
+
+<!-- ═══════════════════════════════════════════
+     AGENTS
+══════════════════════════════════════════════ -->
+<section id="agent-overview" class="doc-section">
+<h1>Agents</h1>
+<p>An agent is the conversational interface over your data. It combines an LLM with access to knowledge bases and database tables, enabling natural language queries over structured and unstructured data alike. This is the final piece of the semantic search pipeline.</p>
+
+<h3>How agents work</h3>
+<div class="steps">
+  <div class="step"><div class="step-num">1</div><div class="step-body"><h3>Input Processing</h3><p>Builds a real-time data catalog from 5-row samples of each connected object. Extracts the question and structures LLM input.</p></div></div>
+  <div class="step"><div class="step-num">2</div><div class="step-body"><h3>Planning</h3><p>Determines which knowledge bases and tables are relevant. Prepares SQL queries as needed.</p></div></div>
+  <div class="step"><div class="step-num">3</div><div class="step-body"><h3>Exploration Loop</h3><p>Executes queries, collects results, adjusts if needed. Up to 20 queries per request.</p></div></div>
+  <div class="step"><div class="step-num">4</div><div class="step-body"><h3>Synthesis</h3><p>Aggregates results and synthesizes a natural language or structured response.</p></div></div>
+</div>
+
+<div class="callout info"><span class="callout-icon">💡</span><p><strong>Performance tip:</strong> keep connected objects to ≤ 10. Create views to pre-aggregate and simplify data before connecting to the agent. The clearer your <code>prompt_template</code>, the more accurate the responses.</p></div>
+</section>
+
+<section id="agent-create" class="doc-section">
+<h2 class="anchor-heading"><a class="anchor-link" href="#agent-create">#</a> CREATE AGENT</h2>
+<div class="syntax-card">
+  <div class="syntax-card-header"><span class="cmd">CREATE AGENT</span></div>
+  <pre><code class="language-sql">CREATE AGENT [project_name.]agent_name
+USING
+  model = {
+    "provider":    "openai",
+    "model_name":  "gpt-4o",
+    "api_key":     "sk-...",
+    "base_url":    "https://...",   -- optional
+    "api_version": "2024-02-01"    -- optional, required for Azure
+  },
+  data = {
+    "knowledge_bases": ["project.kb_name", ...],
+    "tables":          ["datasource.table_name", ...]
+  },
+  prompt_template = 'describe your data here',
+  timeout = 30,
+  mode    = 'text';  -- 'text' or 'sql'</code></pre>
+</div>
+
+<div class="pre-label"><span>SQL — semantic search agent</span><button class="copy-btn" onclick="copyCode(this)">Copy</button></div>
+<pre><code class="language-sql">CREATE AGENT search_project.support_agent
+USING
+  model = {
+    "provider":   "openai",
+    "model_name": "gpt-4o",
+    "api_key":    "sk-..."
+  },
+  data = {
+    "knowledge_bases": ["search_project.support_kb"],
+    "tables": [
+      "my_pg.products",
+      "my_pg.users"
+    ]
+  },
+  prompt_template = '
+    search_project.support_kb contains customer support tickets with fields:
+      - chunk_content: ticket text
+      - product_name:  product the ticket is about
+      - priority:      1 (critical) to 4 (low)
+      - created_at:    submission date
+    my_pg.products contains product catalog.
+    my_pg.users contains user account data.
+    Answer questions accurately and cite which tickets are relevant.
+  ',
+  timeout = 60;</code></pre>
+
+<h3>Supported LLM providers</h3>
+<div class="table-wrap"><table>
+<thead><tr><th>Provider</th><th>Notable models</th></tr></thead>
+<tbody>
+<tr><td><code>openai</code></td><td>gpt-4o, gpt-4.1, gpt-4.1-mini, o3-mini, o4-mini</td></tr>
+<tr><td><code>anthropic</code></td><td>claude-3-opus-20240229, claude-3-sonnet-20240229, claude-3-haiku-20240307</td></tr>
+<tr><td><code>google</code></td><td>gemini-2.5-pro-preview-03-25, gemini-2.0-flash, gemini-1.5-pro</td></tr>
+<tr><td><code>bedrock</code></td><td>All AWS Bedrock models (requires aws_region_name, aws_access_key_id, aws_secret_access_key)</td></tr>
+<tr><td><code>ollama</code></td><td>llama2, mistral, mixtral, codellama, gemma, phi, qwen, and more</td></tr>
+<tr><td><code>nvidia_nim</code></td><td>meta/llama-3_1-70b-instruct, mistralai/mistral-large, and more</td></tr>
+<tr><td><code>writer</code></td><td>palmyra-x5, palmyra-x4</td></tr>
+</tbody>
+</table></div>
+
+<h3>Connect all objects from a source at once</h3>
+<div class="pre-label"><span>SQL — wildcard data connection</span><button class="copy-btn" onclick="copyCode(this)">Copy</button></div>
+<pre><code class="language-sql">CREATE AGENT my_agent
+USING
+  model = { ... },
+  data = {
+    "knowledge_bases": ["search_project.*"],  -- all KBs in project
+    "tables":          ["my_pg.*"]            -- all tables in datasource
+  },
+  prompt_template = '...';</code></pre>
+
+<h3>Use default model from config</h3>
+<div class="pre-label"><span>JSON — config.json</span><button class="copy-btn" onclick="copyCode(this)">Copy</button></div>
+<pre><code class="language-json">{
+  "default_llm": {
+    "provider":   "openai",
+    "model_name": "gpt-4o",
+    "api_key":    "sk-..."
+  }
+}</code></pre>
+<p>When <code>default_llm</code> is set, omit the <code>model</code> parameter from <code>CREATE AGENT</code>.</p>
+</section>
+
+<section id="agent-select" class="doc-section">
+<h2 class="anchor-heading"><a class="anchor-link" href="#agent-select">#</a> SELECT FROM AGENT</h2>
+<p>Query the agent with a natural language question. The agent returns either a free-text answer or structured columns depending on how you write the SELECT.</p>
+
+<div class="pre-label"><span>SQL — natural language answer</span><button class="copy-btn" onclick="copyCode(this)">Copy</button></div>
+<pre><code class="language-sql">SELECT answer
+FROM search_project.support_agent
+WHERE question = 'What are the most common issues with DataSync Pro?';</code></pre>
+
+<div class="pre-label"><span>SQL — structured output</span><button class="copy-btn" onclick="copyCode(this)">Copy</button></div>
+<pre><code class="language-sql">-- Agent formats its response to match the requested columns
+SELECT issue_type, ticket_count, example_ticket_id
+FROM search_project.support_agent
+WHERE question = 'What are the top 5 issue types for DataSync Pro this month?';</code></pre>
+
+<div class="pre-label"><span>SQL — override params at query time</span><button class="copy-btn" onclick="copyCode(this)">Copy</button></div>
+<pre><code class="language-sql">-- Test with a different model without changing the agent definition
+SELECT answer
+FROM search_project.support_agent
+WHERE question = 'Summarize open critical tickets'
+USING
+  model = {
+    "provider":   "anthropic",
+    "model_name": "claude-3-5-sonnet-20241022",
+    "api_key":    "sk-ant-..."
+  };</code></pre>
+</section>
+
+<section id="agent-alter" class="doc-section">
+<h2 class="anchor-heading"><a class="anchor-link" href="#agent-alter">#</a> ALTER AGENT</h2>
+<div class="syntax-card">
+  <div class="syntax-card-header"><span class="cmd">ALTER AGENT</span><span class="desc">Update model, data, or prompt — any combination</span></div>
+  <pre><code class="language-sql">ALTER AGENT agent_name
+USING
+  model           = { ... },
+  data            = { "knowledge_bases": [...], "tables": [...] },
+  prompt_template = '...';</code></pre>
+</div>
+
+<div class="pre-label"><span>SQL — add a new KB to an agent</span><button class="copy-btn" onclick="copyCode(this)">Copy</button></div>
+<pre><code class="language-sql">ALTER AGENT search_project.support_agent
+USING
+  data = {
+    "knowledge_bases": [
+      "search_project.support_kb",
+      "search_project.docs_kb"     -- new KB added
+    ],
+    "tables": ["my_pg.products"]
+  };</code></pre>
+
+<div class="pre-label"><span>SQL — upgrade the model</span><button class="copy-btn" onclick="copyCode(this)">Copy</button></div>
+<pre><code class="language-sql">ALTER AGENT search_project.support_agent
+USING
+  model = {
+    "provider":   "openai",
+    "model_name": "gpt-4.1",
+    "api_key":    "sk-..."
+  };</code></pre>
+</section>
+
+<section id="agent-drop" class="doc-section">
+<h2 class="anchor-heading"><a class="anchor-link" href="#agent-drop">#</a> DROP / SHOW AGENTS</h2>
+<div class="pre-label"><span>SQL</span><button class="copy-btn" onclick="copyCode(this)">Copy</button></div>
+<pre><code class="language-sql">-- Drop an agent
+DROP AGENT agent_name;
+DROP AGENT project_name.agent_name;
+
+-- List agents
+SHOW AGENTS;
+SHOW AGENTS WHERE project = 'search_project';
+SHOW AGENTS WHERE name = 'support_agent';</code></pre>
+<div class="section-divider"></div>
+</section>
+
+<!-- ═══════════════════════════════════════════
+     JOBS
+══════════════════════════════════════════════ -->
+<section id="job-create" class="doc-section">
+<h1>Jobs</h1>
+<p>Jobs schedule any SQL statement (or sequence of statements) to run automatically — once at a future time, or repeatedly on an interval. Use jobs to keep your knowledge bases up to date as new data arrives.</p>
+
+<h2 class="anchor-heading"><a class="anchor-link" href="#job-create">#</a> CREATE JOB</h2>
+<div class="syntax-card">
+  <div class="syntax-card-header"><span class="cmd">CREATE JOB</span></div>
+  <pre><code class="language-sql">CREATE JOB [IF NOT EXISTS] [project_name.]job_name [AS] (
+  &lt;statement_1&gt;[; &lt;statement_2&gt;][; ...]
+)
+[START &lt;date&gt;]
+[END   &lt;date&gt;]
+[EVERY [number] &lt;period&gt;]
+[IF (&lt;condition_statement&gt;)];</code></pre>
+</div>
+
+<div class="table-wrap"><table>
+<thead><tr><th>Clause</th><th>Description</th></tr></thead>
+<tbody>
+<tr><td><code>START &lt;date&gt;</code></td><td>When to begin. Defaults to now if omitted.</td></tr>
+<tr><td><code>END &lt;date&gt;</code></td><td>When to stop recurring. Omit for indefinite repetition.</td></tr>
+<tr><td><code>EVERY [n] &lt;period&gt;</code></td><td>Repetition frequency. Omit to run once. Period values: <code>minute</code>, <code>hour</code>, <code>day</code>, <code>week</code>, <code>month</code>.</td></tr>
+<tr><td><code>IF (...)</code></td><td>Only execute if the condition query returns rows.</td></tr>
+</tbody>
+</table></div>
+
+<p>Date format: <code>'YYYY-MM-DD HH:MM:SS'</code> or <code>'YYYY-MM-DD'</code>. Timezone: UTC.</p>
+
+<div class="pre-label"><span>SQL — refresh KB every hour</span><button class="copy-btn" onclick="copyCode(this)">Copy</button></div>
+<pre><code class="language-sql">CREATE JOB search_project.refresh_support_kb (
+  INSERT INTO search_project.support_kb
+    SELECT ticket_id, subject, body, product_name, priority, created_at
+    FROM my_pg.support_tickets
+    WHERE created_at > LAST
+)
+EVERY hour;</code></pre>
+
+<div class="pre-label"><span>SQL — conditional job (only if new data exists)</span><button class="copy-btn" onclick="copyCode(this)">Copy</button></div>
+<pre><code class="language-sql">CREATE JOB search_project.conditional_kb_refresh (
+  INSERT INTO search_project.support_kb
+    SELECT ticket_id, subject, body, product_name, priority, created_at
+    FROM my_pg.support_tickets
+    WHERE created_at > LAST
+)
+EVERY 30 minutes
+IF (
+  SELECT * FROM my_pg.support_tickets
+  WHERE created_at > LAST
+);</code></pre>
+
+<div class="pre-label"><span>SQL — multi-step job with dynamic table name</span><button class="copy-btn" onclick="copyCode(this)">Copy</button></div>
+<pre><code class="language-sql">CREATE JOB search_project.daily_snapshot (
+  CREATE TABLE my_pg.`kb_snapshot_{{START_DATE}}` (
+    SELECT id, chunk_content, product_name, relevance
+    FROM search_project.support_kb
+    WHERE content = 'critical errors'
+      AND relevance >= 0.7
+  )
+)
+EVERY day;</code></pre>
+<p>Available template variables: <code>{{START_DATETIME}}</code>, <code>{{START_DATE}}</code>, <code>{{PREVIOUS_START_DATETIME}}</code>.</p>
+</section>
+
+<section id="job-last" class="doc-section">
+<h2 class="anchor-heading"><a class="anchor-link" href="#job-last">#</a> LAST keyword</h2>
+<p><code>LAST</code> stores the maximum value seen in the previous run. Use it to process only <em>new</em> rows on each execution — turning any data source into a stream.</p>
+
+<div class="pre-label"><span>SQL — basic LAST usage</span><button class="copy-btn" onclick="copyCode(this)">Copy</button></div>
+<pre><code class="language-sql">-- First run: returns nothing (no prior state)
+-- Second run: returns rows inserted since the first run
+SELECT id, body
+FROM my_pg.support_tickets
+WHERE id > LAST;</code></pre>
+
+<div class="pre-label"><span>SQL — LAST with seed value for first run</span><button class="copy-btn" onclick="copyCode(this)">Copy</button></div>
+<pre><code class="language-sql">-- First run uses 1000 as the seed; subsequent runs use LAST
+SELECT id, body
+FROM my_pg.support_tickets
+WHERE id > COALESCE(LAST, 1000);</code></pre>
+
+<div class="callout info"><span class="callout-icon">💡</span><p>To reset the LAST context in the editor: <code>SET context = 0;</code> or <code>SET context = null;</code></p></div>
+</section>
+
+<section id="job-drop" class="doc-section">
+<h2 class="anchor-heading"><a class="anchor-link" href="#job-drop">#</a> DROP JOB</h2>
+<div class="syntax-card">
+  <div class="syntax-card-header"><span class="cmd">DROP JOB</span></div>
+  <pre><code class="language-sql">DROP JOB [IF EXISTS] [project_name.]job_name;</code></pre>
+</div>
+</section>
+
+<section id="job-show" class="doc-section">
+<h2 class="anchor-heading"><a class="anchor-link" href="#job-show">#</a> SHOW / Query JOBS</h2>
+<div class="pre-label"><span>SQL</span><button class="copy-btn" onclick="copyCode(this)">Copy</button></div>
+<pre><code class="language-sql">-- All jobs
+SHOW JOBS;
+
+-- Jobs in a project
+SHOW JOBS WHERE project = 'search_project';
+
+-- Full details
+SELECT * FROM search_project.jobs;
+SELECT * FROM information_schema.jobs;
+
+-- Execution history (includes errors)
+SELECT * FROM log.jobs_history
+WHERE project = 'search_project'
+ORDER BY run_start DESC
+LIMIT 20;</code></pre>
+
+<p>The jobs table has columns: <code>NAME</code>, <code>PROJECT</code>, <code>RUN_START</code>, <code>RUN_END</code>, <code>NEXT_RUN_AT</code>, <code>SCHEDULE_STR</code>, <code>QUERY</code>. The history table adds <code>ERROR</code>.</p>
+<div class="section-divider"></div>
+</section>
+
+<!-- ═══════════════════════════════════════════
+     FUNCTIONS
+══════════════════════════════════════════════ -->
+<section id="fn-standard" class="doc-section">
+<h1>Functions</h1>
+
+<h2 class="anchor-heading"><a class="anchor-link" href="#fn-standard">#</a> Standard Functions</h2>
+<p>MindsDB runs queries on DuckDB internally — all DuckDB functions are available. MySQL-style functions are adapted automatically.</p>
+
+<h3>DuckDB function categories</h3>
+<div class="table-wrap"><table>
+<thead><tr><th>Category</th><th>Examples</th></tr></thead>
+<tbody>
+<tr><td>Aggregate</td><td><code>SUM</code>, <code>AVG</code>, <code>COUNT</code>, <code>MIN</code>, <code>MAX</code>, <code>LAST</code>, <code>LIST</code></td></tr>
+<tr><td>Text</td><td><code>LOWER</code>, <code>UPPER</code>, <code>TRIM</code>, <code>REPLACE</code>, <code>REGEXP_MATCHES</code>, <code>STRING_SPLIT</code></td></tr>
+<tr><td>Date / Time</td><td><code>NOW</code>, <code>DATE_TRUNC</code>, <code>DATE_DIFF</code>, <code>STRFTIME</code>, <code>EPOCH</code></td></tr>
+<tr><td>Numeric</td><td><code>ROUND</code>, <code>FLOOR</code>, <code>CEIL</code>, <code>ABS</code>, <code>RANDOM</code>, <code>POW</code></td></tr>
+<tr><td>JSON</td><td><code>JSON_EXTRACT</code>, <code>JSON_OBJECT</code>, <code>JSON_ARRAY</code></td></tr>
+<tr><td>Window</td><td><code>ROW_NUMBER</code>, <code>RANK</code>, <code>LAG</code>, <code>LEAD</code>, <code>FIRST_VALUE</code></td></tr>
+<tr><td>List / Array</td><td><code>LIST_AGG</code>, <code>UNNEST</code>, <code>ARRAY_LENGTH</code>, <code>LIST_DISTINCT</code></td></tr>
+</tbody>
+</table></div>
+
+<h3>MySQL-compatible functions</h3>
+<div class="table-wrap"><table>
+<thead><tr><th>Function</th><th>Description</th></tr></thead>
+<tbody>
+<tr><td><code>CHAR()</code>, <code>FORMAT()</code>, <code>INSTR()</code>, <code>LOCATE()</code></td><td>String manipulation</td></tr>
+<tr><td><code>LENGTH()</code>, <code>SUBSTRING_INDEX()</code>, <code>UNHEX()</code></td><td>String utilities</td></tr>
+<tr><td><code>ADDDATE()</code>, <code>DATE_ADD()</code>, <code>DATE_SUB()</code>, <code>DATEDIFF()</code></td><td>Date arithmetic</td></tr>
+<tr><td><code>DATE_FORMAT()</code>, <code>FROM_UNIXTIME()</code>, <code>CURDATE()</code>, <code>CURTIME()</code></td><td>Date formatting</td></tr>
+<tr><td><code>TIMESTAMPDIFF()</code>, <code>CONVERT_TZ()</code></td><td>Timezone &amp; diff</td></tr>
+<tr><td><code>REGEXP_SUBSTR()</code>, <code>SHA2()</code></td><td>Regex &amp; crypto</td></tr>
+</tbody>
+</table></div>
+</section>
+
+<section id="fn-vars" class="doc-section">
+<h2 class="anchor-heading"><a class="anchor-link" href="#fn-vars">#</a> Variables</h2>
+<p>Store API keys and reusable values as session variables. Reference them in <code>CREATE KNOWLEDGE_BASE</code>, <code>CREATE AGENT</code>, and other statements.</p>
+
+<div class="pre-label"><span>SQL — set variables</span><button class="copy-btn" onclick="copyCode(this)">Copy</button></div>
+<pre><code class="language-sql">-- From an environment variable (must start with MDB_)
+SET @openai_key = from_env('MDB_OPENAI_API_KEY');
+
+-- Directly
+SET @pgvector_host = '127.0.0.1';
+
+-- Use in CREATE statements
+CREATE KNOWLEDGE_BASE my_kb
+USING
+  embedding_model = {
+    "provider":   "openai",
+    "model_name": "text-embedding-3-large",
+    "api_key":    @openai_key
+  },
+  ...;</code></pre>
+</section>
+
+<section id="fn-env" class="doc-section">
+<h2 class="anchor-heading"><a class="anchor-link" href="#fn-env">#</a> FROM_ENV()</h2>
+<p>Pull values directly from environment variables into SQL statements. Only variables prefixed with <code>MDB_</code> can be accessed.</p>
+
+<div class="pre-label"><span>SQL</span><button class="copy-btn" onclick="copyCode(this)">Copy</button></div>
+<pre><code class="language-sql">-- Inline in a CREATE statement
+CREATE KNOWLEDGE_BASE my_kb
+USING
+  embedding_model = {
+    "provider":   "openai",
+    "model_name": "text-embedding-3-large",
+    "api_key":    from_env('MDB_OPENAI_API_KEY')
+  },
+  ...;
+
+CREATE AGENT my_agent
+USING
+  model = {
+    "provider":   "openai",
+    "model_name": "gpt-4o",
+    "api_key":    from_env('MDB_OPENAI_API_KEY')
+  },
+  ...;</code></pre>
+
+<div class="callout warn"><span class="callout-icon">⚠</span><p>Only environment variables with names starting with <code>MDB_</code> are accessible via <code>from_env()</code>.</p></div>
+<div class="section-divider"></div>
+
+<p style="text-align:center;color:var(--ink-5);font-size:13px;padding:32px 0 0">MindsDB SQL Reference · Built with the Anton dark design system</p>
+</section>
+
+</div><!-- .page-content -->
+</div><!-- #main -->
+
+<script src="https://cdnjs.cloudflare.com/ajax/libs/prism/1.29.0/prism.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/prism/1.29.0/components/prism-sql.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/prism/1.29.0/components/prism-bash.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/prism/1.29.0/components/prism-json.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/prism/1.29.0/components/prism-python.min.js"></script>
+<script>
+// ── TOGGLE NAV GROUPS ──
+function toggleNav(btn){
+  btn.classList.toggle('open');
+  const items = btn.nextElementSibling;
+  items.classList.toggle('open');
+}
+
+// ── COPY BUTTON ──
+function copyCode(btn){
+  const pre = btn.closest('.pre-label').nextElementSibling;
+  const text = pre ? pre.textContent : '';
+  navigator.clipboard.writeText(text).then(()=>{
+    btn.textContent='Copied!'; btn.classList.add('copied');
+    setTimeout(()=>{ btn.textContent='Copy'; btn.classList.remove('copied'); }, 2000);
+  });
+}
+
+// ── ACTIVE NAV ON SCROLL ──
+const sections = document.querySelectorAll('section[id]');
+const navItems = document.querySelectorAll('.nav-item');
+const io = new IntersectionObserver(entries=>{
+  entries.forEach(e=>{
+    if(e.isIntersecting){
+      navItems.forEach(n=>n.classList.remove('active'));
+      const link = document.querySelector(`.nav-item[href="#${e.target.id}"]`);
+      if(link){ link.classList.add('active'); link.scrollIntoView({block:'nearest'}); }
+    }
+  });
+},{rootMargin:'-60px 0px -70% 0px'});
+sections.forEach(s=>io.observe(s));
+
+// ── SEARCH ──
+const searchIndex = [];
+document.querySelectorAll('section[id]').forEach(sec=>{
+  const heading = sec.querySelector('h1,h2');
+  if(!heading) return;
+  const text = sec.textContent.toLowerCase();
+  searchIndex.push({
+    id: sec.id,
+    title: heading.textContent.trim(),
+    text,
+    path: sec.closest('[id]')?.id || sec.id
+  });
+});
+
+const searchEl  = document.getElementById('search');
+const searchRes = document.getElementById('search-results');
+
+searchEl.addEventListener('input', e=>{
+  const q = e.target.value.trim().toLowerCase();
+  if(!q){ searchRes.classList.remove('show'); searchRes.innerHTML=''; return; }
+  const hits = searchIndex.filter(s=>s.text.includes(q) || s.title.toLowerCase().includes(q)).slice(0,8);
+  if(!hits.length){
+    searchRes.innerHTML='<div class="sr-empty">No results</div>';
+  } else {
+    searchRes.innerHTML = hits.map(h=>`
+      <a class="sr-item" href="#${h.id}" onclick="searchRes.classList.remove('show');searchEl.value=''">
+        <div class="sr-item-title">${h.title}</div>
+        <div class="sr-item-path">#${h.id}</div>
+      </a>`).join('');
+  }
+  searchRes.classList.add('show');
+});
+
+document.addEventListener('click', e=>{ if(!e.target.closest('#search-wrap')) searchRes.classList.remove('show'); });
+document.addEventListener('keydown', e=>{ if(e.key==='/'&&document.activeElement!==searchEl){ e.preventDefault(); searchEl.focus(); } });
+searchEl.addEventListener('keydown', e=>{ if(e.key==='Escape'){ searchRes.classList.remove('show'); searchEl.blur(); } });
+</script>
+</body>
+</html>

@@ -16,7 +16,7 @@ from base_handler_test import BaseHandlerTestSetup, BaseAPIResourceTestSetup
 from mindsdb.integrations.utilities.sql_utils import FilterCondition, FilterOperator
 
 from mindsdb.integrations.libs.response import (
-    HandlerResponse as Response,
+    TableResponse,
     HandlerStatusResponse as StatusResponse,
     RESPONSE_TYPE,
 )
@@ -157,7 +157,7 @@ class TestSalesforceHandler(BaseHandlerTestSetup, unittest.TestCase):
 
     def test_get_tables(self):
         """
-        Test that the `get_tables` method returns a list of tables mapped from the Salesforce API.
+        Test that the `get_tables` method returns a TableResponse with a list of tables mapped from the Salesforce API.
         """
         mock_tables = ["Account", "Contact"]
         self.mock_connect.return_value = MagicMock(
@@ -168,7 +168,7 @@ class TestSalesforceHandler(BaseHandlerTestSetup, unittest.TestCase):
         self.handler.connect()
         response = self.handler.get_tables()
 
-        assert isinstance(response, Response)
+        assert isinstance(response, TableResponse)
         self.assertEqual(response.type, RESPONSE_TYPE.TABLE)
 
         df = response.data_frame
@@ -177,7 +177,7 @@ class TestSalesforceHandler(BaseHandlerTestSetup, unittest.TestCase):
 
     def test_get_columns(self):
         """
-        Test that the `get_columns` method returns a list of columns for a given table.
+        Test that the `get_columns` method returns a TableResponse with a list of columns for a given table.
         """
         mock_columns = ["Id", "Name", "Email"]
         mock_table = "Contact"
@@ -203,7 +203,7 @@ class TestSalesforceHandler(BaseHandlerTestSetup, unittest.TestCase):
         self.handler.connect()
         response = self.handler.get_columns(mock_table)
 
-        assert isinstance(response, Response)
+        assert isinstance(response, TableResponse)
         self.assertEqual(response.type, RESPONSE_TYPE.TABLE)
 
         df = response.data_frame
@@ -435,7 +435,7 @@ class TestSalesforceHandler(BaseHandlerTestSetup, unittest.TestCase):
 
         with patch(
             "mindsdb.integrations.handlers.salesforce_handler.salesforce_handler.MetaAPIHandler.meta_get_tables",
-            return_value=Response(RESPONSE_TYPE.TABLE, None),
+            return_value=TableResponse(),
         ) as mock_meta:
             response = self.handler.meta_get_tables(table_names=["contact"])
 
@@ -678,6 +678,65 @@ class TestSalesforceAnyTable(BaseAPIResourceTestSetup, unittest.TestCase):
         columns = self.resource.meta_get_columns(self.table_name)
         self.assertEqual(columns[0]["column_name"], "Id")
         self.assertEqual(columns[0]["data_type"], "string")
+
+
+class TestSalesforcePassthrough(unittest.TestCase):
+    """Exercise the PassthroughMixin retrofit (per-instance base URL)."""
+
+    CONNECTION_DATA = {
+        "username": "u",
+        "password": "p",
+        "client_id": "cid",
+        "client_secret": "csec",
+        "access_token": "sf_access_tok",
+        "instance_url": "https://my-org.my.salesforce.com",
+    }
+
+    def _mock_response(self, status_code=200):
+        resp = MagicMock()
+        resp.status_code = status_code
+        resp.headers = {"Content-Type": "application/json"}
+        resp.iter_content = MagicMock(return_value=iter([b'{"sobjects":[]}']))
+        resp.close = MagicMock()
+        return resp
+
+    @patch("mindsdb.integrations.libs.passthrough.requests.request")
+    def test_passthrough_uses_bearer_and_instance_url(self, mock_request):
+        mock_request.return_value = self._mock_response()
+        handler = SalesforceHandler("salesforce", connection_data=self.CONNECTION_DATA)
+        from mindsdb.integrations.libs.passthrough_types import PassthroughRequest
+
+        resp = handler.api_passthrough(PassthroughRequest("GET", "/services/data/v60.0/"))
+
+        self.assertEqual(resp.status_code, 200)
+        args, kwargs = mock_request.call_args
+        self.assertEqual(args[0], "GET")
+        self.assertEqual(args[1], "https://my-org.my.salesforce.com/services/data/v60.0/")
+        self.assertEqual(kwargs["headers"]["Authorization"], "Bearer sf_access_tok")
+
+    @patch("mindsdb.integrations.libs.passthrough.requests.request")
+    def test_test_passthrough_returns_ok_on_200(self, mock_request):
+        mock_request.return_value = self._mock_response(status_code=200)
+        handler = SalesforceHandler("salesforce", connection_data=self.CONNECTION_DATA)
+
+        result = handler.test_passthrough()
+
+        self.assertTrue(result["ok"])
+        self.assertEqual(result["status_code"], 200)
+        self.assertEqual(result["host"], "my-org.my.salesforce.com")
+        self.assertIsInstance(result["latency_ms"], int)
+
+    @patch("mindsdb.integrations.libs.passthrough.requests.request")
+    def test_test_passthrough_returns_auth_failed_on_401(self, mock_request):
+        mock_request.return_value = self._mock_response(status_code=401)
+        handler = SalesforceHandler("salesforce", connection_data=self.CONNECTION_DATA)
+
+        result = handler.test_passthrough()
+
+        self.assertFalse(result["ok"])
+        self.assertEqual(result["error_code"], "auth_failed")
+        self.assertEqual(result["status_code"], 401)
+        self.assertEqual(result["host"], "my-org.my.salesforce.com")
 
 
 if __name__ == "__main__":
