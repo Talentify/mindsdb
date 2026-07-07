@@ -1,4 +1,5 @@
 import copy
+import os
 from typing import Dict, List, Optional, Any, Text, Tuple, Union
 import json
 import decimal
@@ -91,9 +92,17 @@ def get_reranking_model_from_params(reranking_model_params: dict):
     # Work on a copy; do not mutate caller's dict
     params_copy = copy.deepcopy(reranking_model_params)
 
-    # Handle API key if not provided
+    # Handle API key. The environment variable takes precedence over any api_key
+    # stored in the reranking_model params, so a rotated key can be updated in one
+    # place (the env) without recreating knowledge bases that stored the old key.
     provider = params_copy.get("provider", "openai").lower()
-    if "api_key" not in params_copy:
+    env_var_names = [f"{provider.upper()}_API_KEY", f"{provider}_api_key"]
+    if provider in ("gemini", "google"):
+        env_var_names += ["GEMINI_API_KEY", "GOOGLE_API_KEY"]
+    env_api_key = next((os.getenv(name) for name in env_var_names if os.getenv(name)), None)
+    if env_api_key:
+        params_copy["api_key"] = env_api_key
+    elif "api_key" not in params_copy:
         params_copy["api_key"] = get_api_key(provider, params_copy, strict=False)
 
     # Handle model_name -> model alias for backward compatibility

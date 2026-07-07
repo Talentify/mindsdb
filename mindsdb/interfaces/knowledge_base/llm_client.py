@@ -76,7 +76,17 @@ class LLMClient:
         if self.provider == "google":
             self.provider = "gemini"
 
-        if "api_key" not in params:
+        # The environment variable takes precedence over any api_key stored in the
+        # knowledge base params. This lets a rotated key be updated in one place (the
+        # env) without recreating every knowledge base that stored the old key.
+        env_var_names = [f"{self.provider.upper()}_API_KEY", f"{self.provider.lower()}_api_key"]
+        if self.provider == "gemini":
+            # provider is normalized from "google" above; the conventional env var is GOOGLE_API_KEY
+            env_var_names += ["GOOGLE_API_KEY", "google_api_key"]
+        env_api_key = next((os.getenv(name) for name in env_var_names if os.getenv(name)), None)
+        if env_api_key:
+            params["api_key"] = env_api_key
+        elif "api_key" not in params:
             api_key = get_api_key(self.provider, params, strict=False)
             if api_key is not None:
                 params["api_key"] = api_key

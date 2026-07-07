@@ -74,6 +74,17 @@ class OpenAIHandler(BaseMLEngine):
         self.api_key_name = getattr(self, "api_key_name", self.name)
         self.api_base = getattr(self, "api_base", OPENAI_API_BASE)
 
+    def _resolve_api_key(self, args: dict) -> Text:
+        """Resolve the API key with the environment variable taking precedence over
+        any key stored in the model args. This lets a rotated key be updated in one
+        place (the env) without recreating models/knowledge bases that stored the old
+        key. Falls back to the standard resolution chain when no env var is set.
+        """
+        env_api_key = os.getenv(f"{self.api_key_name.upper()}_API_KEY") or os.getenv(f"{self.api_key_name.lower()}_api_key")
+        if env_api_key:
+            return env_api_key
+        return get_api_key(self.api_key_name, args, self.engine_storage)
+
     def create_engine(self, connection_args: Dict) -> None:
         """
         Validate the OpenAI API credentials on engine creation.
@@ -231,7 +242,7 @@ class OpenAIHandler(BaseMLEngine):
         args = args["using"]
         args["target"] = target
         try:
-            api_key = get_api_key(self.api_key_name, args, self.engine_storage)
+            api_key = self._resolve_api_key(args)
             connection_args = self.engine_storage.get_connection_args()
             api_base = (
                 args.get("api_base")
@@ -434,7 +445,7 @@ class OpenAIHandler(BaseMLEngine):
         # remove prompts without signal from completion queue
         prompts = [j for i, j in enumerate(prompts) if i not in empty_prompt_ids]
 
-        api_key = get_api_key(self.api_key_name, args, self.engine_storage)
+        api_key = self._resolve_api_key(args)
         api_args = {k: v for k, v in api_args.items() if v is not None}  # filter out non-specified api args
         completion = self._completion(model_name, prompts, api_key, api_args, args, df)
 
@@ -851,7 +862,7 @@ class OpenAIHandler(BaseMLEngine):
         # TODO: Update to use update() artifacts
 
         args = self.model_storage.json_get("args")
-        api_key = get_api_key(self.api_key_name, args, self.engine_storage)
+        api_key = self._resolve_api_key(args)
         if attribute == "args":
             return pd.DataFrame(args.items(), columns=["key", "value"])
         elif attribute == "metadata":
@@ -899,7 +910,7 @@ class OpenAIHandler(BaseMLEngine):
         """  # noqa
         args = args if args else {}
 
-        api_key = get_api_key(self.api_key_name, args, self.engine_storage)
+        api_key = self._resolve_api_key(args)
 
         using_args = args.pop("using") if "using" in args else {}
 
