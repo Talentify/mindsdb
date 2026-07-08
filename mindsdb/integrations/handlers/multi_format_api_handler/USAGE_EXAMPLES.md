@@ -115,6 +115,22 @@ WHERE url = 'https://jsonplaceholder.typicode.com/posts'
 LIMIT 20;
 ```
 
+#### Envelope payload with a domain-specific record array
+When a response wraps the records under a domain key (e.g. `{"tickers": [...],
+"status": "OK", "count": 12962}`), the handler explodes `tickers` into rows and
+reattaches `status`/`count` as constant columns. Auto-detection handles this,
+but you can pin it explicitly with `record_path`:
+
+```sql
+SELECT symbol, price, status, count
+FROM my_api.data
+WHERE url = 'https://api.example.com/snapshot.json'
+  AND record_path = 'tickers';
+```
+
+For a nested array use a dot-path (`record_path = 'data.results'`). To keep the
+legacy single-row shape instead of exploding, set `auto_explode = 'false'`.
+
 ### CSV Examples
 
 #### Iris Dataset

@@ -62,44 +62,141 @@ def detect_format(response, url: str) -> Optional[str]:
     return None
 
 
-def parse_json(content: str) -> pd.DataFrame:
+# Common envelope keys that historically wrapped the record array. Kept for
+# back-compat so payloads like {"data": [...]} keep exploding as before.
+WHITELIST = ['data', 'results', 'items', 'records', 'rows', 'entries']
+
+
+def _is_object_array(value: Any) -> bool:
+    """True if value is a non-empty list whose (sampled) elements are dicts."""
+    return (
+        isinstance(value, list)
+        and len(value) > 0
+        and all(isinstance(item, dict) for item in value[:20])
+    )
+
+
+def _dig(data: Any, path: str) -> Any:
+    """Follow a dot-separated path through nested dicts. Returns None on miss."""
+    node = data
+    for part in path.split('.'):
+        if isinstance(node, dict) and part in node:
+            node = node[part]
+        else:
+            return None
+    return node
+
+
+def _find_object_arrays(node, prefix: str = '', depth: int = 0, max_depth: int = 3):
+    """Recursively collect (dot_path, list) for every list-of-objects reachable
+    within `max_depth` levels of nested dicts."""
+    found = []
+    if isinstance(node, dict) and depth <= max_depth:
+        for k, v in node.items():
+            path = f'{prefix}.{k}' if prefix else k
+            if _is_object_array(v):
+                found.append((path, v))
+            elif isinstance(v, dict):
+                found.extend(_find_object_arrays(v, path, depth + 1, max_depth))
+    return found
+
+
+def _resolve_records(data, record_path: Optional[str] = None):
+    """Determine the primary record array to explode into rows.
+
+    Resolution priority:
+      1. explicit `record_path` dot-path;
+      2. top-level list;
+      3. whitelist envelope keys (list-of-objects only);
+      4. auto-detect via bounded recursion — one candidate wins, multiple ->
+         longest wins with a warning, none -> treat the dict as a single record.
+
+    Returns (records_list_or_None, chosen_top_or_nested_path_or_None).
+    """
+    if record_path:
+        node = _dig(data, record_path)
+        if isinstance(node, list):
+            return node, record_path
+        logger.warning("record_path '%s' did not resolve to a list; auto-detecting", record_path)
+
+    if isinstance(data, list):
+        return data, None
+
+    if isinstance(data, dict):
+        for key in WHITELIST:
+            val = data.get(key)
+            # Whitelist keys match a list of objects OR an empty list (the
+            # latter preserves the original "{'data': []} -> empty DF" behavior).
+            if isinstance(val, list) and (len(val) == 0 or _is_object_array(val)):
+                logger.info(f"Extracting list from '{key}' field")
+                return val, key
+        candidates = _find_object_arrays(data)
+        if len(candidates) == 1:
+            return candidates[0][1], candidates[0][0]
+        if len(candidates) > 1:
+            best = max(candidates, key=lambda c: len(c[1]))
+            logger.warning(
+                "Multiple record arrays %s; using longest '%s'. Set record_path to override.",
+                [p for p, _ in candidates], best[0],
+            )
+            return best[1], best[0]
+        # No record array anywhere: the dict itself is a single record.
+        return [data], None
+
+    return None, None
+
+
+def parse_json(content: str, record_path: Optional[str] = None, auto_explode: bool = True) -> pd.DataFrame:
     """
     Parse JSON content and convert to DataFrame.
-    Handles nested structures using json_normalize.
+
+    Detects the primary record array generically and explodes it into rows,
+    reattaching top-level scalar siblings (e.g. status, count) as constant
+    columns. Set `auto_explode=False` to keep the legacy single-row shape for
+    object payloads, or `record_path` to point at an ambiguous/nested array.
 
     Args:
         content: JSON string
+        record_path: optional dot-path to the record array (overrides detection)
+        auto_explode: when False, object payloads normalize to a single row
 
     Returns:
         pandas DataFrame
     """
     try:
         data = json.loads(content)
-
-        if isinstance(data, list):
-            if len(data) == 0:
-                return pd.DataFrame()
-            df = pd.json_normalize(data)
-        elif isinstance(data, dict):
-            # Check if dict contains a list that should be the main data
-            # Common patterns: {"data": [...], "results": [...], "items": [...]}
-            df = None
-            for key in ['data', 'results', 'items', 'records', 'rows', 'entries']:
-                if key in data and isinstance(data[key], list):
-                    logger.info(f"Extracting list from '{key}' field")
-                    df = pd.json_normalize(data[key])
-                    break
-            if df is None:
-                df = pd.json_normalize(data)
-        else:
-            # Primitive type, wrap in DataFrame
-            return pd.DataFrame({'value': [data]})
-
-        return _ensure_scalar_columns(df)
-
     except json.JSONDecodeError as e:
         logger.error(f"JSON parsing error: {e}")
         raise ValueError(f"Invalid JSON content: {e}")
+
+    if not isinstance(data, (list, dict)):
+        # Primitive type, wrap in DataFrame
+        return pd.DataFrame({'value': [data]})
+
+    # Legacy single-row behavior for object payloads when explosion is disabled.
+    if not auto_explode and isinstance(data, dict):
+        return _ensure_scalar_columns(pd.json_normalize(data))
+
+    records, chosen_path = _resolve_records(data, record_path)
+    if records is None:
+        return pd.DataFrame({'value': [data]})
+    if len(records) == 0:
+        return pd.DataFrame()
+
+    df = pd.json_normalize(records, sep='.')
+
+    # Reattach top-level scalar siblings (status, count, request_id, ...) as
+    # constant columns so envelope metadata is not lost. Skip the array key;
+    # prefix `meta_` on name collisions with normalized record columns.
+    if isinstance(data, dict) and chosen_path:
+        top_key = chosen_path.split('.')[0]
+        for k, v in data.items():
+            if k == top_key:
+                continue
+            if v is None or isinstance(v, (str, int, float, bool)):
+                df[k if k not in df.columns else f'meta_{k}'] = v
+
+    return _ensure_scalar_columns(df)
 
 
 def parse_xml(content: str) -> pd.DataFrame:
@@ -373,13 +470,15 @@ def parse_csv(content: str) -> pd.DataFrame:
         raise ValueError(f"Invalid CSV content: {e}")
 
 
-def parse_response(response, url: str) -> pd.DataFrame:
+def parse_response(response, url: str, record_path: Optional[str] = None, auto_explode: bool = True) -> pd.DataFrame:
     """
     Auto-detect format and parse response to DataFrame.
 
     Args:
         response: requests.Response object
         url: URL string
+        record_path: optional dot-path to the record array (JSON only)
+        auto_explode: when False, JSON object payloads normalize to a single row
 
     Returns:
         pandas DataFrame
@@ -388,7 +487,7 @@ def parse_response(response, url: str) -> pd.DataFrame:
 
     if format_type == 'json':
         logger.info("Detected JSON format")
-        return parse_json(response.text)
+        return parse_json(response.text, record_path, auto_explode)
     elif format_type == 'xml':
         logger.info("Detected XML format")
         return parse_xml(response.text)
@@ -399,7 +498,7 @@ def parse_response(response, url: str) -> pd.DataFrame:
         # Try JSON as default fallback
         logger.warning(f"Could not detect format, trying JSON as fallback")
         try:
-            return parse_json(response.text)
+            return parse_json(response.text, record_path, auto_explode)
         except ValueError:
             # Try XML as second fallback
             try:

@@ -189,6 +189,11 @@ The handler detects the format in the following order:
 
 ### JSON Handling
 
+The handler detects the primary **record array** in a JSON response and
+explodes it into one row per record — even when the array sits under a
+domain-specific key rather than a common envelope key like `data`/`results`.
+Nested objects are flattened with dot notation.
+
 **Input:**
 ```json
 {
@@ -204,6 +209,54 @@ The handler detects the format in the following order:
 |----|-------|-------------|
 | 1  | Alice | 30          |
 | 2  | Bob   | 25          |
+
+#### Envelope payloads (array + scalar siblings)
+
+When the record array is wrapped alongside scalar metadata, those top-level
+scalars are reattached to every row as constant columns, so nothing is lost.
+
+**Input:**
+```json
+{
+  "tickers": [
+    {"symbol": "A", "price": 1.0},
+    {"symbol": "B", "price": 2.0}
+  ],
+  "status": "OK",
+  "count": 2
+}
+```
+
+**Output DataFrame:**
+| symbol | price | status | count |
+|--------|-------|--------|-------|
+| A      | 1.0   | OK     | 2     |
+| B      | 2.0   | OK     | 2     |
+
+If a scalar sibling's name collides with a record column, it is reattached
+under a `meta_` prefix (e.g. `meta_status`).
+
+#### Detection, `record_path`, and `auto_explode`
+
+The record array is resolved in this order: an explicit `record_path`, a
+top-level list, a common envelope key (`data`, `results`, `items`, `records`,
+`rows`, `entries`), then auto-detection of any list-of-objects (searched up to
+3 levels deep). If a payload contains **multiple** candidate arrays, the
+longest is used and a warning is logged — set `record_path` to disambiguate.
+
+- **`record_path`** — dot-path to the record array, e.g. `record_path = 'tickers'`
+  or `record_path = 'data.results'` for a nested array. Overrides auto-detection.
+- **`auto_explode`** — `'true'` (default) or `'false'`. Set to `'false'` to keep
+  the legacy single-row shape for object payloads.
+
+Both can be set at the connection level (PARAMETERS) or per query in the WHERE
+clause:
+
+```sql
+SELECT * FROM my_api.data
+WHERE url = 'https://api.example.com/snapshot.json'
+  AND record_path = 'tickers';
+```
 
 ### XML Handling
 
@@ -298,6 +351,8 @@ Error: Failed to fetch data from URL: 404 Client Error
 | headers          | dict   | Default headers for all requests                                 | {}      |
 | timeout          | int    | Default request timeout in seconds                               | 30      |
 | max_content_size | int    | Maximum response size in MB (prevents large downloads)           | 100     |
+| record_path      | string | Dot-path to the JSON record array (overrides auto-detection)     | None    |
+| auto_explode     | string | Explode JSON record arrays into rows: `'true'`/`'false'`         | 'true'  |
 
 ### Query Parameters
 
@@ -307,6 +362,8 @@ Error: Failed to fetch data from URL: 404 Client Error
 | headers          | string | JSON string of request-specific headers                         | {}      |
 | timeout          | int    | Request timeout in seconds                                       | 30      |
 | max_content_size | int    | Maximum response size in MB (overrides connection-level setting) | 100     |
+| record_path      | string | Dot-path to the JSON record array (overrides auto-detection)     | None    |
+| auto_explode     | string | Explode JSON record arrays into rows: `'true'`/`'false'`         | 'true'  |
 
 ## Limitations
 
