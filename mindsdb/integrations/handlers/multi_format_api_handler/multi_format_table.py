@@ -40,6 +40,19 @@ def _coerce_dict_arg(value, arg_name: str) -> dict:
     return {}
 
 
+def _coerce_bool_arg(value, default: bool = True) -> bool:
+    """Coerce a STR/bool arg (e.g. 'auto_explode') to a boolean. Falls back to
+    `default` when unset; recognises common falsey strings."""
+    if value is None:
+        return default
+    if isinstance(value, bool):
+        return value
+    text = str(value).strip().lower()
+    if text == '':
+        return default
+    return text not in ('false', '0', 'no', 'off')
+
+
 class MultiFormatAPITable(APIResource):
     """
     Generic API table that fetches and parses data from URLs.
@@ -72,6 +85,8 @@ class MultiFormatAPITable(APIResource):
         body = {}
         timeout = self.handler.connection_args.get('timeout', 30)
         max_content_size_mb = self.handler.connection_args.get('max_content_size', 100)
+        record_path = self.handler.connection_args.get('record_path') or None
+        auto_explode = _coerce_bool_arg(self.handler.connection_args.get('auto_explode'), default=True)
 
         if conditions:
             for condition in conditions:
@@ -106,6 +121,12 @@ class MultiFormatAPITable(APIResource):
                         max_content_size_mb = float(condition.value)
                     except Exception:
                         logger.warning(f"Invalid max_content_size value: {condition.value}")
+                    condition.applied = True
+                elif column == 'record_path':
+                    record_path = condition.value or None
+                    condition.applied = True
+                elif column == 'auto_explode':
+                    auto_explode = _coerce_bool_arg(condition.value, default=auto_explode)
                     condition.applied = True
 
         # Use connection-level URL if query-level not provided
@@ -215,7 +236,7 @@ class MultiFormatAPITable(APIResource):
 
         # Parse response based on detected format
         try:
-            df = parse_response(mock_response, url)
+            df = parse_response(mock_response, url, record_path, auto_explode)
         except ValueError as e:
             logger.error(f"Parsing failed: {e}")
             raise

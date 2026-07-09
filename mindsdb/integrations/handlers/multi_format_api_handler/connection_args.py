@@ -39,6 +39,26 @@ connection_args = OrderedDict(
         'required': False,
         'label': 'Max Content Size (MB)',
     },
+    record_path={
+        'type': ARG_TYPE.STR,
+        'description': (
+            'Dot-path to the array of records inside a JSON response (e.g. "tickers" '
+            'or "data.results"). Use to override auto-detection when a payload has '
+            'ambiguous or nested record arrays. Leave empty to auto-detect.'
+        ),
+        'required': False,
+        'label': 'JSON Record Path',
+    },
+    auto_explode={
+        'type': ARG_TYPE.STR,
+        'description': (
+            "Whether to explode a JSON record array into rows ('true'/'false'). "
+            "Default 'true'. Set to 'false' to keep the legacy single-row shape "
+            'for object payloads.'
+        ),
+        'required': False,
+        'label': 'Auto-Explode JSON Arrays',
+    },
 )
 
 
