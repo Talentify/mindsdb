@@ -53,6 +53,34 @@ def _coerce_bool_arg(value, default: bool = True) -> bool:
     return text not in ('false', '0', 'no', 'off')
 
 
+def _extract_api_error_detail(error: requests.exceptions.RequestException) -> str:
+    """Pull the API's own error message out of a failed response body.
+
+    requests' HTTPError only stringifies the status line (e.g. "400 Client Error:
+    Bad Request for url: ..."), so the server's explanation is otherwise lost.
+    Many APIs return it as {"error": "..."} / {"message": "..."}. Returns a short
+    suffix to append to the raised error, or '' when no body is available.
+    """
+    response = getattr(error, 'response', None)
+    if response is None:
+        return ''
+    try:
+        body = (response.text or '').strip()
+    except Exception:  # defensive: some response objects can raise on .text
+        return ''
+    if not body:
+        return ''
+    try:
+        parsed = response.json()
+    except ValueError:
+        parsed = None
+    if isinstance(parsed, dict):
+        message = parsed.get('error') or parsed.get('message') or parsed.get('detail')
+        if message:
+            return f" | API error: {message}"
+    return f" | response body: {body[:500]}"
+
+
 class MultiFormatAPITable(APIResource):
     """
     Generic API table that fetches and parses data from URLs.
@@ -231,8 +259,9 @@ class MultiFormatAPITable(APIResource):
             mock_response = MockResponse(content_text, response.headers)
 
         except requests.exceptions.RequestException as e:
-            logger.error(f"Request failed: {e}")
-            raise ValueError(f"Failed to fetch data from {url}: {e}")
+            detail = _extract_api_error_detail(e)
+            logger.error(f"Request failed: {e}{detail}")
+            raise ValueError(f"Failed to fetch data from {url}: {e}{detail}")
 
         # Parse response based on detected format
         try:
