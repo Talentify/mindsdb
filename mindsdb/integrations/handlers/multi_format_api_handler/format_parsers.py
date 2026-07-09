@@ -175,7 +175,7 @@ def parse_json(content: str, record_path: Optional[str] = None, auto_explode: bo
 
     # Legacy single-row behavior for object payloads when explosion is disabled.
     if not auto_explode and isinstance(data, dict):
-        return _ensure_scalar_columns(pd.json_normalize(data))
+        return _ensure_scalar_columns(pd.json_normalize(data, sep='_'))
 
     records, chosen_path = _resolve_records(data, record_path)
     if records is None:
@@ -183,7 +183,11 @@ def parse_json(content: str, record_path: Optional[str] = None, auto_explode: bo
     if len(records) == 0:
         return pd.DataFrame()
 
-    df = pd.json_normalize(records, sep='.')
+    # Flatten nested dicts with an underscore separator (e.g. day_c), NOT a dot.
+    # MindsDB executes projections through DuckDB, where a dotted name like `day.c`
+    # is parsed as a struct/table qualifier (column `c` of `day`) instead of a
+    # column literally named "day.c" — and no quoting form survives that rewrite.
+    df = pd.json_normalize(records, sep='_')
 
     # Reattach top-level scalar siblings (status, count, request_id, ...) as
     # constant columns so envelope metadata is not lost. Skip the array key;
