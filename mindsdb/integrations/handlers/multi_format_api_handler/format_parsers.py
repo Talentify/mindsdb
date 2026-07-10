@@ -181,7 +181,25 @@ def parse_json(content: str, record_path: Optional[str] = None, auto_explode: bo
     if records is None:
         return pd.DataFrame({'value': [data]})
     if len(records) == 0:
-        return pd.DataFrame()
+        # Empty record array (e.g. {"results": [], "next_url": "..."}). A bare
+        # pd.DataFrame() is shape (0, 0) — zero columns — which DuckDB rejects
+        # downstream with "Need a DataFrame with at least one column" when the
+        # planner runs `SELECT * FROM df`. That surfaces to the agent as an opaque
+        # DuckDB error and triggers pointless query-rewrite retries, when the
+        # query was in fact valid and simply matched no rows.
+        #
+        # Preserve the envelope's top-level scalar siblings as columns so the
+        # empty result still carries metadata (status, count, next_url, ...);
+        # fall back to a single sentinel column so DuckDB always has a schema
+        # to describe.
+        columns = []
+        if isinstance(data, dict):
+            top_key = chosen_path.split('.')[0] if chosen_path else None
+            columns = [
+                k for k, v in data.items()
+                if k != top_key and (v is None or isinstance(v, (str, int, float, bool)))
+            ]
+        return pd.DataFrame(columns=columns or ['_empty'])
 
     df = pd.json_normalize(records, sep='.')
 
