@@ -151,6 +151,32 @@ def test_empty_array_returns_empty_dataframe():
     df = parse_json(_dumps(payload))
 
     assert len(df) == 0
+    # Must never be a (0, 0) frame: DuckDB's `SELECT * FROM df` requires at
+    # least one column, else it raises "Need a DataFrame with at least one
+    # column" and the agent misreads a valid empty result as a bad query.
+    assert df.shape[1] >= 1
+
+
+def test_empty_array_preserves_envelope_scalar_columns():
+    # Regression: {"results": [], "next_url": "..."} previously produced a
+    # (0, 0) DataFrame, crashing DuckDB downstream. It must now yield an empty
+    # frame whose columns are the envelope's scalar siblings.
+    payload = {"results": [], "next_url": "https://api.example.com/next", "count": 0}
+    df = parse_json(_dumps(payload))
+
+    assert len(df) == 0
+    assert "next_url" in df.columns
+    assert "count" in df.columns
+    assert "results" not in df.columns
+
+
+def test_empty_top_level_array_falls_back_to_sentinel_column():
+    # A bare empty list has no envelope metadata to borrow columns from, so it
+    # falls back to a sentinel column to keep DuckDB happy.
+    df = parse_json(_dumps([]))
+
+    assert len(df) == 0
+    assert df.shape[1] >= 1
 
 
 def test_primitive_wrapped_in_value_column():
