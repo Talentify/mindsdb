@@ -3,5 +3,5 @@ datasets==2.16.1
 evaluate==0.4.3
 nltk==3.9.3
 huggingface-hub==1.9.1
-torch==2.8.0+cpu
+torch==2.13.0
 transformers==5.5.0
