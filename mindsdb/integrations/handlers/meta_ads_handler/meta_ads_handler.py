@@ -9,7 +9,14 @@ from typing import Any
 import requests
 from mindsdb_sql_parser import parse_sql
 
-from mindsdb.integrations.handlers.meta_ads_handler.errors import MetaAdsAPIError, is_large_request_error
+from mindsdb.integrations.handlers.meta_ads_handler.errors import (
+    INSIGHTS_NON_RETRYABLE,
+    INSIGHTS_RETRYABLE,
+    MetaAdsAPIError,
+    error_code_pair,
+    is_large_request_error,
+    to_int,
+)
 from mindsdb.integrations.handlers.meta_ads_handler.tables import (
     AccountTable,
     AdCreativesTable,
@@ -245,15 +252,40 @@ class MetaAdsHandler(APIHandler):
 
     @classmethod
     def _is_retryable(cls, status_code: int, error_info: dict | None) -> bool:
-        # The oversized-report error is technically code 1 (in TRANSIENT_ERROR_CODES),
-        # but it is not transient -- retrying wastes the whole backoff budget before
-        # InsightsTable ever gets a chance to fall back to the async report flow.
+        # Precedence matters here, and this order is the actual fix for the
+        # wasted-backoff bug: the documented Insights (code, error_subcode) taxonomy
+        # (tasks/meta-ads-api-research/error-codes.md) must be checked BEFORE the
+        # legacy generic `code in TRANSIENT_ERROR_CODES` set below. Otherwise, e.g.,
+        # code 2 / subcode 1504041 ("Invalid Breakdowns") matches the legacy bare
+        # `code == 2` retryable set and we burn the whole backoff budget re-sending a
+        # request that can never succeed.
+        pair = error_code_pair(error_info)
+
+        # 1. Documented non-retryable Insights pairs always win first.
+        if pair is not None and pair in INSIGHTS_NON_RETRYABLE:
+            return False
+
+        # 2. Large-request signals are also not retryable -- already the case, kept
+        #    here so InsightsTable's async-report fallback is reached quickly instead
+        #    of after a full retry cycle.
         if error_info and is_large_request_error(error_info):
             return False
+
+        # 3. Documented retryable Insights pairs.
+        if pair is not None and pair in INSIGHTS_RETRYABLE:
+            return True
+
+        # 4. Transport-level signals: rate limiting / server errors.
         if status_code == 429 or status_code >= 500:
             return True
-        if error_info and error_info.get("code") in TRANSIENT_ERROR_CODES:
+
+        # 5. Legacy generic Graph API codes -- kept as a fallback for errors outside
+        #    the documented Insights taxonomy above (this set predates it and isn't
+        #    confirmed wrong for the non-Insights cases it may still cover).
+        if error_info and to_int(error_info.get("code")) in TRANSIENT_ERROR_CODES:
             return True
+
+        # 6. Everything else is treated as non-retryable.
         return False
 
     @staticmethod
