@@ -1260,3 +1260,84 @@ def test_ads_and_ad_sets_request_adaptive_page_size(handler):
     with patch.object(handler, "graph_get_all", wraps=handler.graph_get_all) as spy:
         CampaignsTable(handler).select(parse_sql("SELECT * FROM campaigns"))
         assert spy.call_args.kwargs.get("adaptive_page_size", False) is False
+
+
+# ---------------------------------------------------------------------------
+# Session resilience: HandlersCache disconnects handlers mid-query
+#
+# MindsDB's HandlersCache (interfaces/database/integrations.py, ttl=60s) runs a
+# cleaner thread that calls handler.disconnect() -- setting self.session to None --
+# based on when the handler was last fetched from the cache, NOT on whether a query
+# is still running. A full `ads` scan legitimately exceeds 60s, so this is a routine
+# condition for this handler. Before the _active_session() fix it surfaced as an
+# opaque "'NoneType' object has no attribute 'get'".
+# ---------------------------------------------------------------------------
+
+
+def test_get_with_retry_reconnects_when_session_was_disconnected(handler):
+    """A disconnect *before* the request must reconnect, not raise AttributeError."""
+    session = MagicMock()
+    session.get.return_value = _build_json_response({"data": [{"id": "1"}]})
+    _attach_session(handler, session)
+
+    handler.disconnect()
+    assert handler.session is None
+
+    with patch(SESSION_PATCH_PATH, return_value=session):
+        payload = handler._get_with_retry("https://graph.facebook.com/v25.0/act_1/ads", {})
+
+    assert payload == {"data": [{"id": "1"}]}
+    assert handler.session is not None
+
+
+def test_graph_get_all_survives_disconnect_between_pages(handler):
+    """The real failure shape: the cleaner thread disconnects mid-pagination.
+
+    Page 1 succeeds, the handler is disconnected (as HandlersCache does once the 60s
+    TTL lapses), and page 2 must still be fetched rather than dying with
+    AttributeError: 'NoneType' object has no attribute 'get'.
+    """
+    session = MagicMock()
+    page1 = _build_json_response(
+        {"data": [{"id": "1"}], "paging": {"next": "https://graph.facebook.com/v25.0/act_1/ads?after=cursor"}}
+    )
+    page2 = _build_json_response({"data": [{"id": "2"}]})
+
+    def side_effect(*args, **kwargs):
+        if session.get.call_count == 1:
+            # Simulate HandlersCache's cleaner thread firing between pages.
+            handler.disconnect()
+            return page1
+        return page2
+
+    session.get.side_effect = side_effect
+    _attach_session(handler, session)
+
+    with patch(SESSION_PATCH_PATH, return_value=session):
+        rows = handler.graph_get_all("act_1/ads", {"fields": "id"})
+
+    assert [r["id"] for r in rows] == ["1", "2"]
+    assert session.get.call_count == 2
+
+
+def test_graph_post_reconnects_when_session_was_disconnected(handler):
+    """Defence-in-depth only -- this test does NOT fail without the _active_session fix.
+
+    graph_post() calls self.connect() on entry, so the "session is already None when we
+    arrive" case was never broken here; verified by reverting the fix and watching this
+    test still pass. It is kept as a regression pin in case that connect() is ever
+    removed. The genuinely exposed path is a disconnect landing *during* the call, which
+    a mocked session cannot faithfully simulate -- graph_get_all's mid-pagination test
+    above is what actually covers the failure mode.
+    """
+    session = MagicMock()
+    session.post.return_value = _build_json_response({"report_run_id": "42"})
+    _attach_session(handler, session)
+
+    handler.disconnect()
+    assert handler.session is None
+
+    with patch(SESSION_PATCH_PATH, return_value=session):
+        payload = handler.graph_post("act_1/insights", {"level": "campaign"})
+
+    assert payload == {"report_run_id": "42"}

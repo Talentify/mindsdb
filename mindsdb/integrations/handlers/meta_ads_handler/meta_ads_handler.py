@@ -165,7 +165,12 @@ class MetaAdsHandler(APIHandler):
         url = f"{self.base_url}/{path}"
         request_params = self._encode_params(self._merge_auth_params(params))
         try:
-            response = self.session.post(url, data=request_params, headers=self._auth_headers(), timeout=60)
+            # _active_session(), not self.session: the insights async-report flow polls
+            # for minutes, far longer than the 60s HandlersCache TTL that disconnects
+            # this handler mid-query.
+            response = self._active_session().post(
+                url, data=request_params, headers=self._auth_headers(), timeout=60
+            )
         except requests.RequestException as exc:
             raise RuntimeError(f"Meta Ads request failed: {exc}") from exc
 
@@ -280,11 +285,39 @@ class MetaAdsHandler(APIHandler):
             url = next_url
             request_params = self._encode_params(self._merge_auth_params(None))
 
+    def _active_session(self) -> requests.Session:
+        """Return a live session, re-establishing it if the handler was disconnected.
+
+        MindsDB's HandlersCache (see interfaces/database/integrations.py, ttl=60s) runs
+        a cleaner thread that calls handler.disconnect() -- which sets self.session to
+        None -- based on when the handler was last *fetched from the cache*, not on
+        whether a query is still running. `expired_at` is refreshed in HandlersCache.get(),
+        so a single query that runs longer than the TTL never refreshes it and has its
+        session closed out from under it mid-flight. The cleaner's
+        `sys.getrefcount(...) == 2` guard does not prevent this: it measures the refcount
+        of the cache *entry dict*, while an in-flight query holds a reference to the
+        *handler*, which never touches that count.
+
+        For this handler that is a normal condition rather than an exceptional one -- a
+        full `ads` scan is ~7k rows x 20 fields over ~15 pages and legitimately exceeds
+        60s, more so when adaptive_page_size shrinks the page and re-fetches. So
+        re-establish and carry on instead of surfacing the original symptom, an opaque
+        "'NoneType' object has no attribute 'get'" from self.session.get(...).
+
+        The returned reference is used for the request itself, so a disconnect landing
+        between this call and the request cannot turn into an AttributeError.
+        """
+        if self.session is None:
+            self.connect()
+        return self.session
+
     def _get_with_retry(self, url: str, params: dict[str, Any]) -> dict:
         attempt = 0
         while True:
             try:
-                response = self.session.get(url, params=params, headers=self._auth_headers(), timeout=60)
+                response = self._active_session().get(
+                    url, params=params, headers=self._auth_headers(), timeout=60
+                )
             except requests.RequestException as exc:
                 if attempt >= self.MAX_RETRIES:
                     raise RuntimeError(f"Meta Ads request failed: {exc}") from exc
