@@ -30,6 +30,7 @@ langsmith
 linkedin_ads
 intercom
 jira
+meta_ads
 microsoft_ads
 ms_one_drive
 ms_teams
