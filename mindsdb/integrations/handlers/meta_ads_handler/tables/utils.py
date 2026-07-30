@@ -50,6 +50,24 @@ def _to_numeric(df: pd.DataFrame, cols: Iterable[str]) -> pd.DataFrame:
     return df
 
 
+def _join_list(value: Any) -> Any:
+    """Comma-join a list of scalar values (e.g. enum strings); pass through anything
+    else unchanged.
+
+    Encoding rule (applied consistently across campaigns/ad_sets/ads): a list of
+    scalar enums/strings is comma-joined so `=`/`LIKE` behave the way a user expects
+    in SQL, e.g. `special_ad_categories = 'HOUSING'`. A JSON-encoded list would make
+    that comparison silently return zero rows instead. Lists of *objects* (or other
+    nested structures) are a different case and stay JSON-encoded -- see the
+    JSON_COLUMNS handling in each table.
+
+    Elements are str()-cast before joining: some of these fields are documented as
+    list<int> rather than list<string> (e.g. ad_sets' flattened `genders`, coded 1/2),
+    and `",".join(...)` raises TypeError on a non-string element.
+    """
+    return ",".join(str(v) for v in value) if isinstance(value, list) else value
+
+
 def _collect_identifiers(node) -> List[str]:
     """Recursively collect all Identifier column names from any AST node.
 

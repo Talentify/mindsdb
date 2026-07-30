@@ -33,7 +33,9 @@ try:
     from mindsdb_sql_parser import parse_sql
 
     from mindsdb.integrations.handlers.meta_ads_handler.connection_args import connection_args
+    from mindsdb.integrations.handlers.meta_ads_handler.errors import MetaAdsAPIError
     from mindsdb.integrations.handlers.meta_ads_handler.meta_ads_handler import MetaAdsHandler
+    from mindsdb.integrations.handlers.meta_ads_handler.tables.account import AccountTable
     from mindsdb.integrations.handlers.meta_ads_handler.tables.ad_creatives import AdCreativesTable
     from mindsdb.integrations.handlers.meta_ads_handler.tables.ad_sets import AdSetsTable
     from mindsdb.integrations.handlers.meta_ads_handler.tables.ads import AdsTable
@@ -42,6 +44,13 @@ try:
     from mindsdb.integrations.libs.response import RESPONSE_TYPE, TableResponse
 except ImportError:
     pytestmark = pytest.mark.skip("Meta Ads handler not installed")
+
+
+def _large_request_error_response():
+    return _build_json_response(
+        {"error": {"message": "Please reduce the amount of data you're asking for", "code": 1, "error_subcode": 99}},
+        status_code=400,
+    )
 
 
 SESSION_PATCH_PATH = "mindsdb.integrations.handlers.meta_ads_handler.meta_ads_handler.requests.Session"
@@ -904,3 +913,350 @@ def test_native_query_returns_handler_response(handler):
     assert isinstance(response, TableResponse)
     assert response.type == RESPONSE_TYPE.TABLE
     assert response.data_frame.iloc[0]["name"] == "Campaign 1"
+
+
+# ---------------------------------------------------------------------------
+# 21. Phase 1 review fixes -- _REQUEST_FIELDS/COLUMNS split invariant
+#
+# This construct (a derived-columns set carved out of COLUMNS so client-side-only
+# columns never get sent to Graph's `fields` param) has broken the handler's import
+# twice via a class-body-comprehension NameError. These assertions pin both
+# directions permanently: no derived column leaks into the request, and no
+# requested field is missing from COLUMNS.
+# ---------------------------------------------------------------------------
+
+
+def test_ad_sets_request_fields_excludes_flattened_targeting_columns():
+    derived = set(AdSetsTable._FLATTENED_TARGETING_COLUMNS)
+    request_fields = set(AdSetsTable._REQUEST_FIELDS)
+
+    assert request_fields & derived == set()
+    assert set(AdSetsTable.COLUMNS) - request_fields == derived
+
+
+def test_account_request_fields_excludes_label_columns():
+    derived = set(AccountTable._DERIVED_COLUMNS)
+    request_fields = set(AccountTable._REQUEST_FIELDS)
+
+    assert request_fields & derived == set()
+    assert set(AccountTable.COLUMNS) - request_fields == derived
+
+
+# ---------------------------------------------------------------------------
+# 22. Phase 1 review fixes -- _flatten_targeting
+# ---------------------------------------------------------------------------
+
+
+def test_flatten_targeting_full_blob():
+    row = {
+        "id": "20",
+        "targeting": {
+            "age_min": 18,
+            "age_max": 65,
+            "genders": ["male", "female"],
+            "publisher_platforms": ["facebook", "instagram"],
+            "device_platforms": ["mobile"],
+            "facebook_positions": ["feed"],
+            "custom_audiences": [{"id": "1"}],
+            "excluded_custom_audiences": [{"id": "2"}],
+        },
+    }
+
+    result = AdSetsTable._flatten_targeting(row)
+
+    assert result["age_min"] == 18
+    assert result["age_max"] == 65
+    assert result["genders"] == ["male", "female"]
+    assert result["publisher_platforms"] == ["facebook", "instagram"]
+    assert result["device_platforms"] == ["mobile"]
+    assert result["facebook_positions"] == ["feed"]
+    assert result["custom_audiences"] == [{"id": "1"}]
+    assert result["excluded_custom_audiences"] == [{"id": "2"}]
+
+
+def test_flatten_targeting_absent_key_yields_none_for_all_flattened_columns():
+    result = AdSetsTable._flatten_targeting({"id": "20"})
+
+    for column in AdSetsTable._FLATTENED_TARGETING_COLUMNS:
+        assert result[column] is None
+
+
+def test_flatten_targeting_none_value_yields_none_for_all_flattened_columns():
+    result = AdSetsTable._flatten_targeting({"id": "20", "targeting": None})
+
+    for column in AdSetsTable._FLATTENED_TARGETING_COLUMNS:
+        assert result[column] is None
+
+
+def test_flatten_targeting_non_dict_string_does_not_raise():
+    # Reviewer-reproduced defect: `row.get("targeting") or {}` then `.get(...)` raised
+    # AttributeError on a string `targeting`, killing the entire table.
+    result = AdSetsTable._flatten_targeting({"id": "20", "targeting": "oops"})
+
+    for column in AdSetsTable._FLATTENED_TARGETING_COLUMNS:
+        assert result[column] is None
+
+
+def test_flatten_targeting_partial_blob_only_some_keys_present():
+    result = AdSetsTable._flatten_targeting({"id": "20", "targeting": {"age_min": 21, "genders": [1]}})
+
+    assert result["age_min"] == 21
+    assert result["genders"] == [1]
+    assert result["age_max"] is None
+    assert result["publisher_platforms"] is None
+    assert result["custom_audiences"] is None
+
+
+# ---------------------------------------------------------------------------
+# 23. Phase 1 review fixes -- enum label helper / columns
+# ---------------------------------------------------------------------------
+
+
+def test_label_for_known_code():
+    assert AccountTable._label_for(AccountTable.ACCOUNT_STATUS_LABELS, 1) == "ACTIVE"
+
+
+def test_label_for_unknown_code_returns_none():
+    assert AccountTable._label_for(AccountTable.ACCOUNT_STATUS_LABELS, 999) is None
+
+
+def test_label_for_none_input_returns_none():
+    assert AccountTable._label_for(AccountTable.ACCOUNT_STATUS_LABELS, None) is None
+
+
+def test_label_for_numeric_string_input_normalizes():
+    assert AccountTable._label_for(AccountTable.ACCOUNT_STATUS_LABELS, "1") == "ACTIVE"
+
+
+def test_disable_reason_label_partial_mapping_documented_codes_only():
+    assert AccountTable._label_for(AccountTable.DISABLE_REASON_LABELS, 0) == "NONE"
+    assert AccountTable._label_for(AccountTable.DISABLE_REASON_LABELS, 15) == "COMPROMISED_AD_ACCOUNT"
+    # Codes 1-14 are undocumented -- must resolve to None, never a guessed label.
+    assert AccountTable._label_for(AccountTable.DISABLE_REASON_LABELS, 7) is None
+
+
+def test_account_select_star_includes_label_columns(handler):
+    session = MagicMock()
+    session.get.return_value = _build_json_response(
+        {"id": "act_123456", "account_id": "123456", "account_status": 1, "tax_id_status": 2, "disable_reason": 0}
+    )
+    _attach_session(handler, session)
+
+    table = AccountTable(handler)
+    query = parse_sql("SELECT * FROM account")
+
+    df = table.select(query)
+
+    assert df.iloc[0]["account_status_label"] == "ACTIVE"
+    assert df.iloc[0]["tax_id_status_label"] == "REQUIRED"
+    assert df.iloc[0]["disable_reason_label"] == "NONE"
+
+    sent_fields = session.get.call_args.kwargs["params"]["fields"].split(",")
+    assert "account_status_label" not in sent_fields
+    assert "tax_id_status_label" not in sent_fields
+    assert "disable_reason_label" not in sent_fields
+
+
+def test_account_balance_and_age_coerced_from_live_measured_wire_types(handler):
+    # Live-measured against the real account: `balance` arrives as a numeric string,
+    # `age` as a float -- neither matches the doc's bare type name at a glance.
+    session = MagicMock()
+    session.get.return_value = _build_json_response(
+        {"id": "act_123456", "balance": "23799", "age": 1981.2596643519}
+    )
+    _attach_session(handler, session)
+
+    table = AccountTable(handler)
+    df = table.select(parse_sql("SELECT * FROM account"))
+
+    assert df.iloc[0]["balance"] == 23799
+    assert df.iloc[0]["age"] == pytest.approx(1981.2596643519)
+
+
+# ---------------------------------------------------------------------------
+# 24. Phase 1 review fixes -- unified list-of-scalar encoding (F1 regression guard)
+#
+# Originally this pinned that `special_ad_categories` encodes identically on
+# `campaigns` and `ads` -- before the fix, campaigns comma-joined it while ads
+# JSON-encoded it, so `WHERE special_ad_categories = 'HOUSING'` silently returned
+# zero rows from `ads` while working on `campaigns`. `ads.special_ad_categories`
+# was since removed entirely (Meta gates it behind app whitelisting -- see the
+# comment in ads.py), so the ads/campaigns comparison no longer applies. The
+# underlying invariant this test protects -- every LIST_COLUMNS entry, on every
+# table that declares one, comma-joins a list input rather than JSON-encoding it --
+# is still worth pinning on its own, generalised across all tables with
+# LIST_COLUMNS, so it keeps holding if a whitelisted app ever restores
+# ads.special_ad_categories.
+# ---------------------------------------------------------------------------
+
+
+def test_campaigns_list_columns_are_comma_joined_not_json_encoded(handler):
+    session = MagicMock()
+    session.get.return_value = _build_json_response(
+        {
+            "data": [
+                {
+                    "id": "1",
+                    "special_ad_categories": ["HOUSING", "EMPLOYMENT"],
+                    "special_ad_category_country": ["US", "CA"],
+                    "pacing_type": ["standard", "no_pacing"],
+                }
+            ]
+        }
+    )
+    _attach_session(handler, session)
+
+    table = CampaignsTable(handler)
+    df = table.select(parse_sql("SELECT * FROM campaigns"))
+
+    row = df.iloc[0]
+    for column in CampaignsTable.LIST_COLUMNS:
+        assert isinstance(row[column], str), f"{column} should be comma-joined, not JSON-encoded"
+    assert row["special_ad_categories"] == "HOUSING,EMPLOYMENT"
+    assert row["special_ad_category_country"] == "US,CA"
+    assert row["pacing_type"] == "standard,no_pacing"
+
+
+def test_ad_sets_list_columns_are_comma_joined_not_json_encoded(handler):
+    session = MagicMock()
+    session.get.return_value = _build_json_response(
+        {
+            "data": [
+                {
+                    "id": "20",
+                    "targeting": {
+                        # genders is documented as list<int> (1/2), not list<string> --
+                        # exercises _join_list's str()-cast of elements.
+                        "genders": [1, 2],
+                        "publisher_platforms": ["facebook", "instagram"],
+                        "device_platforms": ["mobile", "desktop"],
+                        "facebook_positions": ["feed"],
+                    },
+                }
+            ]
+        }
+    )
+    _attach_session(handler, session)
+
+    table = AdSetsTable(handler)
+    df = table.select(parse_sql("SELECT * FROM ad_sets"))
+
+    row = df.iloc[0]
+    for column in AdSetsTable.LIST_COLUMNS:
+        assert isinstance(row[column], str), f"{column} should be comma-joined, not JSON-encoded"
+    assert row["genders"] == "1,2"
+    assert row["publisher_platforms"] == "facebook,instagram"
+    assert row["device_platforms"] == "mobile,desktop"
+    assert row["facebook_positions"] == "feed"
+
+
+def test_ads_no_longer_declares_special_ad_categories():
+    # Pinned regression guard for the whitelisting removal: special_ad_categories
+    # must not silently creep back into ads.py's COLUMNS/fields (it 400s the whole
+    # table for this app -- see the comment in ads.py).
+    assert "special_ad_categories" not in AdsTable.COLUMNS
+    assert "special_ad_categories" not in AdsTable._REQUEST_FIELDS
+
+
+# ---------------------------------------------------------------------------
+# 25. Phase 1 review fixes -- graph_get_all adaptive_page_size (F4)
+#
+# adaptive_page_size defaults to False so every pre-existing caller (InsightsTable
+# included) keeps today's exact behaviour. This is the test that pins the default
+# path: it's what protects InsightsTable's own async-report fallback, so a future
+# refactor that flips the default would break Insights silently without it.
+# ---------------------------------------------------------------------------
+
+
+def test_graph_get_all_default_propagates_large_request_error_untouched(handler):
+    session = MagicMock()
+    session.get.return_value = _large_request_error_response()
+    _attach_session(handler, session)
+
+    with pytest.raises(MetaAdsAPIError, match="reduce the amount of data"):
+        handler.graph_get_all("act_123456/ads", {"fields": "id"})
+
+    # No adaptive retry without opting in -- exactly one request, error unchanged.
+    assert session.get.call_count == 1
+
+
+def test_graph_get_all_adaptive_page_size_shrinks_and_recovers(handler):
+    session = MagicMock()
+    session.get.side_effect = [
+        _large_request_error_response(),
+        _build_json_response({"data": [{"id": "1"}]}),
+    ]
+    _attach_session(handler, session)
+
+    rows = handler.graph_get_all("act_123456/ads", {"fields": "id"}, adaptive_page_size=True)
+
+    assert rows == [{"id": "1"}]
+    assert session.get.call_count == 2
+    assert session.get.call_args_list[0].kwargs["params"]["limit"] == MetaAdsHandler.DEFAULT_PAGE_SIZE
+    assert session.get.call_args_list[1].kwargs["params"]["limit"] == MetaAdsHandler.DEFAULT_PAGE_SIZE // 2
+
+
+def test_graph_get_all_adaptive_page_size_reraises_unchanged_at_floor(handler):
+    session = MagicMock()
+    session.get.return_value = _large_request_error_response()
+    _attach_session(handler, session)
+
+    # Starting page_size=30 (via limit=30) needs only one halving to hit the floor
+    # (25), keeping this test independent of DEFAULT_PAGE_SIZE's exact value.
+    with pytest.raises(MetaAdsAPIError, match="reduce the amount of data"):
+        handler.graph_get_all("act_123456/ads", {"fields": "id"}, limit=30, adaptive_page_size=True)
+
+    assert session.get.call_count == 2
+    assert session.get.call_args_list[0].kwargs["params"]["limit"] == 30
+    assert session.get.call_args_list[1].kwargs["params"]["limit"] == MetaAdsHandler.MIN_ADAPTIVE_PAGE_SIZE
+
+
+def test_graph_get_all_adaptive_page_size_keeps_shrunk_size_on_later_pages(handler):
+    session = MagicMock()
+    session.get.side_effect = [
+        _large_request_error_response(),
+        # Page 1 succeeds at the shrunk size; Graph's own paging.next preserves that
+        # `limit`, so page 2 should never need to shrink again on its own.
+        _build_json_response(
+            {
+                "data": [{"id": "1"}],
+                "paging": {
+                    "next": (
+                        f"https://graph.facebook.com/v25.0/act_123456/ads"
+                        f"?limit={MetaAdsHandler.DEFAULT_PAGE_SIZE // 2}&after=cursor1"
+                    )
+                },
+            }
+        ),
+        _build_json_response({"data": [{"id": "2"}]}),
+    ]
+    _attach_session(handler, session)
+
+    rows = handler.graph_get_all("act_123456/ads", {"fields": "id"}, adaptive_page_size=True)
+
+    assert [row["id"] for row in rows] == ["1", "2"]
+    assert session.get.call_count == 3
+    # Page 2's URL already carries the shrunk limit from paging.next -- no explicit
+    # `limit` override needed (or sent) by graph_get_all itself for that request.
+    assert f"limit={MetaAdsHandler.DEFAULT_PAGE_SIZE // 2}" in session.get.call_args_list[2].args[0]
+
+
+def test_ads_and_ad_sets_request_adaptive_page_size(handler):
+    """ads/ad_sets carry the new large/nested Phase 1 fields and must opt in;
+    everything else (in particular InsightsTable) must not.
+    """
+    session = MagicMock()
+    session.get.return_value = _build_json_response({"data": []})
+    _attach_session(handler, session)
+
+    with patch.object(handler, "graph_get_all", wraps=handler.graph_get_all) as spy:
+        AdsTable(handler).select(parse_sql("SELECT * FROM ads"))
+        assert spy.call_args.kwargs["adaptive_page_size"] is True
+
+    with patch.object(handler, "graph_get_all", wraps=handler.graph_get_all) as spy:
+        AdSetsTable(handler).select(parse_sql("SELECT * FROM ad_sets"))
+        assert spy.call_args.kwargs["adaptive_page_size"] is True
+
+    with patch.object(handler, "graph_get_all", wraps=handler.graph_get_all) as spy:
+        CampaignsTable(handler).select(parse_sql("SELECT * FROM campaigns"))
+        assert spy.call_args.kwargs.get("adaptive_page_size", False) is False

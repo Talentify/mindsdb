@@ -5,6 +5,7 @@ import hmac
 import json
 import time
 from typing import Any
+from urllib.parse import parse_qsl, urlencode, urlsplit, urlunsplit
 
 import requests
 from mindsdb_sql_parser import parse_sql
@@ -48,6 +49,8 @@ class MetaAdsHandler(APIHandler):
     RETRY_BASE_SECONDS = 2
     MAX_RETRIES = 3
     MAX_BACKOFF_SECONDS = 30
+    # Floor for graph_get_all's opt-in adaptive_page_size backoff (see graph_get_all).
+    MIN_ADAPTIVE_PAGE_SIZE = 25
 
     def __init__(self, name: str, **kwargs):
         super().__init__(name)
@@ -170,9 +173,50 @@ class MetaAdsHandler(APIHandler):
             return response.json()
         self._raise_for_error(response)
 
-    def graph_get_all(self, path: str, params: dict[str, Any] | None = None, limit: int | None = None) -> list[dict]:
+    @staticmethod
+    def _strip_query_param(url: str, key: str) -> str:
+        """Remove a single query param from a URL, preserving the rest. Used to drop
+        a stale `limit` baked into Graph's own paging.next before re-adding our own
+        (possibly shrunk) value -- otherwise both would be sent and Graph would see
+        a duplicate `limit` key.
+        """
+        parts = urlsplit(url)
+        query = [(k, v) for k, v in parse_qsl(parts.query, keep_blank_values=True) if k != key]
+        return urlunsplit((parts.scheme, parts.netloc, parts.path, urlencode(query), parts.fragment))
+
+    def graph_get_all(
+        self,
+        path: str,
+        params: dict[str, Any] | None = None,
+        limit: int | None = None,
+        adaptive_page_size: bool = False,
+    ) -> list[dict]:
         """Cursor-paginate over a Graph edge, following paging.next until limit rows
         are collected or paging.next is absent. Hard-caps total pages at MAX_PAGES.
+
+        adaptive_page_size: opt-in only, default False. Every existing caller
+        (InsightsTable included) keeps today's exact behaviour with zero test churn
+        unless it explicitly passes True.
+
+        Insights and the entity tables (campaigns/ad_sets/ads/...) have genuinely
+        different correct responses to a large-request error: Insights escalates to
+        its own async-report flow (see InsightsTable.list()) because its payloads are
+        unbounded by nature (breakdown cardinality x date range); the entity tables
+        just need a smaller page of an otherwise-bounded row set. A single global
+        policy here would be wrong for at least one of them, so the strategy is
+        opt-in per call site rather than a blanket change. ads.py/ad_sets.py (which
+        carry the new large/nested Phase 1 fields) pass True; everything else,
+        including InsightsTable, does not -- its `except MetaAdsAPIError` /
+        async-report fallback is completely untouched by this parameter.
+
+        When adaptive_page_size is True and a request fails with
+        is_large_request_error(), the page size is halved and the SAME page is
+        retried, down to a floor of MIN_ADAPTIVE_PAGE_SIZE. Once shrunk, the smaller
+        size is kept for subsequent pages rather than reset -- if page 1 was too big,
+        page 2 almost certainly is too, and resetting would re-pay the failure on
+        every page. At the floor, the original MetaAdsAPIError is re-raised
+        unchanged -- never wrapped -- so any caller's `except` sees exactly what it
+        sees today.
         """
         self.connect()
         params = dict(params or {})
@@ -188,9 +232,35 @@ class MetaAdsHandler(APIHandler):
         url = f"{self.base_url}/{path}"
         request_params = self._encode_params(self._merge_auth_params(params))
         pages = 0
+        on_first_page = True
 
         while True:
-            payload = self._get_with_retry(url, request_params)
+            try:
+                payload = self._get_with_retry(url, request_params)
+            except MetaAdsAPIError as exc:
+                can_shrink = adaptive_page_size and exc.is_large_request_error() and page_size > self.MIN_ADAPTIVE_PAGE_SIZE
+                if not can_shrink:
+                    raise
+                new_page_size = max(page_size // 2, self.MIN_ADAPTIVE_PAGE_SIZE)
+                logger.warning(
+                    "meta_ads.graph_get_all: large-request error for path=%s; shrinking page size %s -> %s "
+                    "and retrying the same page",
+                    path,
+                    page_size,
+                    new_page_size,
+                )
+                page_size = new_page_size
+                if on_first_page:
+                    params["limit"] = page_size
+                    request_params = self._encode_params(self._merge_auth_params(params))
+                else:
+                    retry_params = self._merge_auth_params(None)
+                    retry_params["limit"] = page_size
+                    url = self._strip_query_param(url, "limit")
+                    request_params = self._encode_params(retry_params)
+                continue
+
+            on_first_page = False
             pages += 1
             rows.extend(payload.get("data", []))
 
@@ -205,6 +275,8 @@ class MetaAdsHandler(APIHandler):
                 return rows
 
             # paging.next already carries the cursor and fields; just re-apply auth.
+            # (It also carries whatever `limit` was in effect for the page that
+            # generated it, so a shrunk page_size persists into later pages for free.)
             url = next_url
             request_params = self._encode_params(self._merge_auth_params(None))
 
