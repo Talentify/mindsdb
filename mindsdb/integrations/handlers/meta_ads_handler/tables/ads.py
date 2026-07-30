@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import json
+
 import pandas as pd
 
 from mindsdb.integrations.libs.api_handler import APIResource
@@ -12,7 +14,13 @@ class AdsTable(APIResource):
     when adset_id/campaign_id are given in WHERE (Pattern A: always fetch the full field list).
 
     creative_id is flattened from the nested creative{id} field requested from Graph.
-    bid_amount is in the account's currency minor units (cents), not major units.
+    bid_amount is returned by Graph in the account's currency minor units. Meta
+    defines a per-currency offset controlling this: offset 100 (the common case, e.g.
+    USD) means the value is expressed in 1/100ths of the base unit (divide by 100 to
+    get base units, e.g. cents to dollars); offset 1 (CLP, COP, CRC, HUF, ISK, IDR,
+    JPY, KRW, PYG, TWD, VND) means the value already is the base unit, no division
+    needed. Use the account's `currency` field (see account.py) to know which
+    applies. We do not scale this value today.
     """
 
     COLUMNS = [
@@ -27,9 +35,36 @@ class AdsTable(APIResource):
         "preview_shareable_link",
         "created_time",
         "updated_time",
+        "configured_status",
+        "targeting",
+        "issues_info",
+        "ad_review_feedback",
+        "recommendations",
+        "conversion_specs",
+        "tracking_specs",
+        "source_ad_id",
+        "adlabels",
+        # special_ad_categories intentionally NOT added here. It's documented and
+        # valid on the ad node, but live validation against the real account
+        # returned "(#3) App must be on whitelist" -- Meta gates Special Ad Category
+        # (housing/employment/credit compliance) fields behind app review, and this
+        # app isn't whitelisted. ads.py is Pattern A (one combined `fields=` string),
+        # so keeping it would 400 every `SELECT ... FROM ads`, not just queries that
+        # reference the column. Re-add only once the app passes that review.
+        # campaigns.special_ad_categories is unaffected -- it shipped before Phase 1
+        # and is verified separately.
     ]
 
     NUMERIC_COLUMNS = ["bid_amount"]
+    JSON_COLUMNS = [
+        "targeting",
+        "issues_info",
+        "ad_review_feedback",
+        "recommendations",
+        "conversion_specs",
+        "tracking_specs",
+        "adlabels",
+    ]
 
     # Graph field names actually requested; creative_id is derived from the nested
     # creative{id} field rather than requested directly.
@@ -60,14 +95,24 @@ class AdsTable(APIResource):
             if effective_status:
                 params["effective_status"] = [str(v) for v in effective_status]
 
+            # adaptive_page_size=True: ads now unconditionally requests several
+            # large/nested fields (targeting, recommendations, issues_info,
+            # ad_review_feedback, conversion_specs, tracking_specs). On a large
+            # account this can trip Meta's oversized-request error at the default
+            # page size; graph_get_all shrinks the page and retries rather than
+            # hard-failing a previously-working table.
             if adset_id is not None:
-                rows = self.handler.graph_get_all(f"{adset_id}/ads", params, limit=limit)
+                rows = self.handler.graph_get_all(f"{adset_id}/ads", params, limit=limit, adaptive_page_size=True)
             else:
                 campaign_id = _get_condition_value(conditions, "campaign_id")
                 if campaign_id is not None:
-                    rows = self.handler.graph_get_all(f"{campaign_id}/ads", params, limit=limit)
+                    rows = self.handler.graph_get_all(
+                        f"{campaign_id}/ads", params, limit=limit, adaptive_page_size=True
+                    )
                 else:
-                    rows = self.handler.graph_get_all(f"{self.handler.account_path}/ads", params, limit=limit)
+                    rows = self.handler.graph_get_all(
+                        f"{self.handler.account_path}/ads", params, limit=limit, adaptive_page_size=True
+                    )
 
         for row in rows:
             creative = row.pop("creative", None) if isinstance(row, dict) else None
@@ -81,6 +126,8 @@ class AdsTable(APIResource):
             if column not in df.columns:
                 df[column] = None
 
+        for column in self.JSON_COLUMNS:
+            df[column] = df[column].apply(lambda v: json.dumps(v) if isinstance(v, (dict, list)) else v)
         df = _to_numeric(df, self.NUMERIC_COLUMNS)
 
         return df[self.COLUMNS]

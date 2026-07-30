@@ -30,8 +30,9 @@ class AdCreativesTable(APIResource):
     other shape yields None instead of raising. The raw asset_feed_spec column (JSON
     encoded, like object_story_spec) is kept as the source of truth regardless.
 
-    Every level of these specs can be absent; missing values become None, never a
-    KeyError.
+    Every level of these specs can be absent, or present but not a dict (e.g. a stray
+    string); missing/wrong-shaped values become None, never a KeyError or an
+    AttributeError -- see _as_dict().
     """
 
     COLUMNS = [
@@ -51,7 +52,18 @@ class AdCreativesTable(APIResource):
         "object_story_spec",
         "asset_feed_spec",
         "instagram_permalink_url",
+        "product_set_id",
+        "template_url_spec",
+        "platform_customizations",
+        "image_crops",
+        "degrees_of_freedom_spec",
+        "authorization_category",
+        "effective_authorization_category",
     ]
+
+    # Object/list-valued fields, JSON-encoded the same way object_story_spec and
+    # asset_feed_spec already are below.
+    JSON_COLUMNS = ["template_url_spec", "platform_customizations", "image_crops", "degrees_of_freedom_spec"]
 
     def get_columns(self) -> list[str]:
         return self.COLUMNS
@@ -84,14 +96,22 @@ class AdCreativesTable(APIResource):
             return None
         return cls._parse_asset_feed_element(items[0])
 
+    @staticmethod
+    def _as_dict(value) -> dict:
+        """Treat anything that isn't a dict (missing, None, or a stray string/list)
+        as empty rather than raising -- defence-in-depth against a shape we haven't
+        seen live, matching the "never a KeyError" guarantee for AttributeError too.
+        """
+        return value if isinstance(value, dict) else {}
+
     @classmethod
     def _flatten_creative(cls, row: dict) -> dict:
         result = dict(row)
-        story_spec = row.get("object_story_spec") or {}
-        link_data = story_spec.get("link_data") or {}
-        video_data = story_spec.get("video_data") or {}
-        photo_data = story_spec.get("photo_data") or {}
-        template_data = story_spec.get("template_data") or {}
+        story_spec = cls._as_dict(row.get("object_story_spec"))
+        link_data = cls._as_dict(story_spec.get("link_data"))
+        video_data = cls._as_dict(story_spec.get("video_data"))
+        photo_data = cls._as_dict(story_spec.get("photo_data"))
+        template_data = cls._as_dict(story_spec.get("template_data"))
 
         def _cta_type(data: dict):
             cta = data.get("call_to_action") or {}
@@ -134,7 +154,7 @@ class AdCreativesTable(APIResource):
             or photo_data.get("caption")
         )
 
-        asset_feed_spec = row.get("asset_feed_spec") or {}
+        asset_feed_spec = cls._as_dict(row.get("asset_feed_spec"))
         if asset_feed_spec:
             result["title"] = result["title"] or cls._asset_feed_value(asset_feed_spec, "titles")
             result["body"] = result["body"] or cls._asset_feed_value(asset_feed_spec, "bodies")
@@ -177,5 +197,7 @@ class AdCreativesTable(APIResource):
         df["asset_feed_spec"] = df["asset_feed_spec"].apply(
             lambda v: json.dumps(v) if isinstance(v, (dict, list)) else v
         )
+        for column in self.JSON_COLUMNS:
+            df[column] = df[column].apply(lambda v: json.dumps(v) if isinstance(v, (dict, list)) else v)
 
         return df[self.COLUMNS]

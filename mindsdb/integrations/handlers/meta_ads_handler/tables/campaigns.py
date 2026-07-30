@@ -1,10 +1,12 @@
 from __future__ import annotations
 
+import json
+
 import pandas as pd
 
 from mindsdb.integrations.libs.api_handler import APIResource
 
-from .utils import _get_condition_value, _get_condition_values, _to_numeric
+from .utils import _get_condition_value, _get_condition_values, _join_list, _to_numeric
 
 
 class CampaignsTable(APIResource):
@@ -12,7 +14,13 @@ class CampaignsTable(APIResource):
     full field list, let APIResource.select()/DuckDB narrow the projection).
 
     Budget fields (daily_budget, lifetime_budget, budget_remaining, spend_cap) are
-    returned by Graph in the account's currency minor units (cents), not major units.
+    returned by Graph in the account's currency minor units. Meta defines a
+    per-currency offset controlling this: offset 100 (the common case, e.g. USD)
+    means the value is expressed in 1/100ths of the base unit (divide by 100 to get
+    base units, e.g. cents to dollars); offset 1 (CLP, COP, CRC, HUF, ISK, IDR, JPY,
+    KRW, PYG, TWD, VND) means the value already is the base unit, no division needed.
+    Use the account's `currency` field (see account.py) to know which applies. We do
+    not scale these values today.
     """
 
     COLUMNS = [
@@ -32,9 +40,33 @@ class CampaignsTable(APIResource):
         "stop_time",
         "created_time",
         "updated_time",
+        "configured_status",
+        "account_id",
+        "promoted_object",
+        "issues_info",
+        "special_ad_category_country",
+        "source_campaign_id",
+        "pacing_type",
+        "topline_id",
+        "adlabels",
+        "primary_attribution",
     ]
 
     NUMERIC_COLUMNS = ["daily_budget", "lifetime_budget", "budget_remaining", "spend_cap"]
+
+    # Object/list-valued fields, JSON-encoded into the DataFrame column like
+    # object_story_spec is in ad_creatives.py.
+    JSON_COLUMNS = [
+        "promoted_object",
+        "issues_info",
+        "adlabels",
+    ]
+
+    # List-of-scalar-enum fields, comma-joined instead of JSON-encoded (see
+    # _join_list in utils.py for why). special_ad_categories already used this
+    # encoding pre-Phase-1; special_ad_category_country is the same family
+    # (list<enum> of country codes) and follows the same rule.
+    LIST_COLUMNS = ["special_ad_categories", "special_ad_category_country", "pacing_type"]
 
     def get_columns(self) -> list[str]:
         return self.COLUMNS
@@ -74,9 +106,10 @@ class CampaignsTable(APIResource):
             if column not in df.columns:
                 df[column] = None
 
-        df["special_ad_categories"] = df["special_ad_categories"].apply(
-            lambda v: ",".join(v) if isinstance(v, list) else v
-        )
+        for column in self.LIST_COLUMNS:
+            df[column] = df[column].apply(_join_list)
+        for column in self.JSON_COLUMNS:
+            df[column] = df[column].apply(lambda v: json.dumps(v) if isinstance(v, (dict, list)) else v)
         df = _to_numeric(df, self.NUMERIC_COLUMNS)
 
         return df[self.COLUMNS]
