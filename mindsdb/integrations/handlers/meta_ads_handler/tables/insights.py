@@ -283,6 +283,18 @@ class InsightsTable(APIResource):
 
     def __init__(self, *args, **kwargs):
         super().__init__(*args, **kwargs)
+        # NOTE: the two attributes below carry per-query state from select() into
+        # list(). That is only safe because MetaAdsHandler does NOT declare
+        # `thread_safe = True`: HandlersCache keys its entries by
+        # threading.get_native_id() for such handlers (see HandlersCache.set in
+        # mindsdb/interfaces/database/integrations.py), so every thread gets its own
+        # handler instance and therefore its own table instances.
+        #
+        # Do NOT add `thread_safe = True` to MetaAdsHandler without first moving this
+        # state off the instance. With a shared instance, two concurrent queries would
+        # race: one query's select() would overwrite the other's resolved fields
+        # between that query's select() and list(), silently sending the wrong `fields`
+        # to Graph and returning columns the caller never asked for.
         self._requested_fields: list[str] | None = None
         # Whether list() may push the SQL LIMIT down to Graph's `limit` param. False
         # for aggregate/complex-target queries -- see select() for why.
