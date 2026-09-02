@@ -4,4 +4,4 @@ evaluate==0.4.3
 nltk==3.9.3
 huggingface-hub==1.9.1
 torch==2.8.0
-transformers==5.5.0
+transformers==5.10.1
